@@ -208,6 +208,11 @@ async function initAdminDashboard() {
     document.getElementById('generateReportBtn').addEventListener('click', generateReport);
     document.getElementById('exportExcelBtn').addEventListener('click', exportReport);
     document.getElementById('printReportBtn').addEventListener('click', () => window.print());
+    document.getElementById('showAllEmployeesBtn').addEventListener('click', () => {
+        MapManager.showAllEmployees();
+        document.getElementById('showAllEmployeesBtn').classList.add('d-none');
+        loadAdminData();
+    });
 
     await loadAdminData();
     setInterval(loadAdminData, 60000);
@@ -273,9 +278,21 @@ function renderEmployeeTable(employees) {
     document.querySelectorAll('.view-employee-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const id = btn.dataset.id;
-            const response = await API.getEmployee(id);
-            if (response.success) {
-                MapManager.focusOnEmployee(response.data);
+            try {
+                const response = await API.getEmployee(id);
+                if (response && response.success) {
+                    const shown = MapManager.focusOnEmployee(response.data);
+                    if (shown) {
+                        document.getElementById('showAllEmployeesBtn').classList.remove('d-none');
+                    } else {
+                        alert(`${response.data.name} has no saved location yet.`);
+                    }
+                } else {
+                    alert((response && response.message) || 'Unable to load employee location.');
+                }
+            } catch (error) {
+                console.error('Error loading employee location:', error);
+                alert('Unable to load employee location. Please try again.');
             }
         });
     });

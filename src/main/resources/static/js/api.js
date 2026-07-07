@@ -23,8 +23,17 @@ const API = {
             credentials: 'include'
         });
 
-        if (response.status === 401) {
-            window.location.href = '/index.html';
+        // /api/auth/me is used to check whether a session already exists, and
+        // /api/auth/login is the login attempt itself - a 401 from either of these
+        // simply means "not logged in" / "bad credentials", not an expired session.
+        // Redirecting here would otherwise send the login page back to itself,
+        // causing an infinite reload loop for anyone who isn't logged in yet.
+        const isAuthCheckOrLogin = url.includes('/api/auth/me') || url.includes('/api/auth/login');
+
+        if (response.status === 401 && !isAuthCheckOrLogin) {
+            if (!window.location.pathname.endsWith('/index.html') && window.location.pathname !== '/') {
+                window.location.href = '/index.html';
+            }
             throw new Error('Unauthorized');
         }
 

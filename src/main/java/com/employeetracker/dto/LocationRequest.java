@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 
+// Note: accuracy is optional (may be null), but when present it must be non-negative.
+
 public class LocationRequest {
 
     @NotNull(message = "Latitude is required")
@@ -18,6 +20,7 @@ public class LocationRequest {
     @DecimalMax(value = "180.0", message = "Longitude must be between -180 and 180")
     private BigDecimal longitude;
 
+    @DecimalMin(value = "0.0", message = "Accuracy cannot be negative")
     private BigDecimal accuracy;
 
     public BigDecimal getLatitude() {

@@ -49,13 +49,13 @@ public class StopDetectionService {
         );
 
         if (withinRadius) {
-            handlePotentialStop(userId, currentLocation, openStop, durationMinutes);
+            handlePotentialStop(userId, currentLocation, previous, openStop, durationMinutes);
         } else {
             closeOpenStopIfExists(openStop, currentLocation.getLocationTime());
         }
     }
 
-    private void handlePotentialStop(Long userId, EmployeeLocation currentLocation,
+    private void handlePotentialStop(Long userId, EmployeeLocation currentLocation, EmployeeLocation previousLocation,
                                      Optional<EmployeeStop> openStop, int durationMinutes) {
         if (openStop.isPresent()) {
             EmployeeStop stop = openStop.get();
@@ -73,7 +73,10 @@ public class StopDetectionService {
         newStop.setUserId(userId);
         newStop.setLatitude(currentLocation.getLatitude());
         newStop.setLongitude(currentLocation.getLongitude());
-        newStop.setStartTime(currentLocation.getLocationTime());
+        // "Within radius" means the employee hadn't moved since the previous ping,
+        // so the stop actually started back then - anchoring on currentLocation's
+        // time would understate every stop's duration by roughly one update interval.
+        newStop.setStartTime(previousLocation.getLocationTime());
         EmployeeStop saved = stopRepository.save(newStop);
 
         activityService.logActivity(
@@ -101,6 +104,18 @@ public class StopDetectionService {
         int durationSeconds = (int) Duration.between(stop.getStartTime(), endTime).getSeconds();
         stop.setDuration(durationSeconds);
         stopRepository.save(stop);
+    }
+
+    /**
+     * Closes any stop that is still open for this user (EndTime is null).
+     * Must be called on logout: since stops are only meaningful while an employee
+     * is actively tracked, an in-progress stop left open after logout would keep
+     * showing as "ongoing" indefinitely and would corrupt future duration reads.
+     */
+    @Transactional
+    public void closeOpenStopForUser(Long userId, LocalDateTime endTime) {
+        Optional<EmployeeStop> openStop = stopRepository.findTopByUserIdAndEndTimeIsNullOrderByStartTimeDesc(userId);
+        closeOpenStopIfExists(openStop, endTime);
     }
 
     public boolean isCurrentlyStopped(Long userId) {

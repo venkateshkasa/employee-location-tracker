@@ -69,6 +69,15 @@ public class LocationService {
             throw new ResourceNotFoundException("Only employees can save location updates");
         }
 
+        // GPS tracking is considered "active" only once the employee has actually
+        // sent a location update after logging in - flip the flag here rather than
+        // at login time so ONLINE (logged in, no GPS yet) and MOVING/STOPPED
+        // (logged in + tracking) stay distinguishable.
+        if (!Boolean.TRUE.equals(user.getIsTracking())) {
+            user.setIsTracking(true);
+            userRepository.save(user);
+        }
+
         LocalDateTime now = LocalDateTime.now();
         Optional<EmployeeLocation> previousLocation = locationRepository.findTopByUserIdOrderByLocationTimeDesc(userId);
 
@@ -122,11 +131,15 @@ public class LocationService {
     }
 
     public List<StopDto> getTodayStops(Long userId) {
+        return getStopsForDate(userId, LocalDate.now());
+    }
+
+    public List<StopDto> getStopsForDate(Long userId, LocalDate date) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        LocalDateTime start = DateTimeUtil.startOfToday();
-        LocalDateTime end = DateTimeUtil.endOfToday();
+        LocalDateTime start = DateTimeUtil.startOfDay(date);
+        LocalDateTime end = DateTimeUtil.endOfDay(date);
 
         return stopRepository.findUserStopsInRange(userId, start, end).stream()
                 .map(stop -> mapToStopDto(user, stop))
@@ -142,17 +155,29 @@ public class LocationService {
                 .collect(Collectors.toList());
     }
 
-    public TrackingStatus determineTrackingStatus(Long userId, EmployeeLocation location) {
-        if (location == null) {
+    public TrackingStatus determineTrackingStatus(User user, EmployeeLocation location) {
+        // The employee's own logged-in state is authoritative. Without this check,
+        // any employee with an old location row would show as ONLINE/MOVING forever,
+        // even years after they last logged in.
+        if (user == null || !Boolean.TRUE.equals(user.getIsLoggedIn())) {
             return TrackingStatus.OFFLINE;
         }
 
-        long minutesSinceUpdate = java.time.Duration.between(location.getLocationTime(), LocalDateTime.now()).toMinutes();
-        if (minutesSinceUpdate > trackingProperties.getOnlineThresholdMinutes()) {
-            return TrackingStatus.OFFLINE;
+        if (location != null) {
+            long minutesSinceUpdate = java.time.Duration.between(location.getLocationTime(), LocalDateTime.now()).toMinutes();
+            if (minutesSinceUpdate > trackingProperties.getOnlineThresholdMinutes()) {
+                // Safety net for a session that died without an explicit logout
+                // (crashed app, closed browser) - don't keep claiming ONLINE forever.
+                return TrackingStatus.OFFLINE;
+            }
         }
 
-        if (stopDetectionService.isCurrentlyStopped(userId)) {
+        // Logged in, but hasn't sent a GPS update yet (or tracking hasn't started).
+        if (!Boolean.TRUE.equals(user.getIsTracking()) || location == null) {
+            return TrackingStatus.ONLINE;
+        }
+
+        if (stopDetectionService.isCurrentlyStopped(user.getUserId())) {
             return TrackingStatus.STOPPED;
         }
 
@@ -162,7 +187,7 @@ public class LocationService {
     private LocationResponse buildLocationResponse(User user, EmployeeLocation location) {
         LocationResponse response = mapToLocationResponse(user, location);
         response.setTodayDistanceKm(distanceCalculationService.calculateTodayDistanceKm(user.getUserId()));
-        response.setStatus(determineTrackingStatus(user.getUserId(), location).name());
+        response.setStatus(determineTrackingStatus(user, location).name());
         return response;
     }
 

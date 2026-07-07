@@ -9,6 +9,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "Users")
 public class User {
@@ -40,6 +42,21 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(name = "Status", nullable = false, length = 20)
     private UserStatus status = UserStatus.ACTIVE;
+
+    // Authoritative login/tracking state. Employee status must be derived from
+    // these flags (not merely from the presence of an old location row) so that
+    // an employee is never shown as ONLINE/MOVING unless they are actually logged in.
+    @Column(name = "IsLoggedIn", nullable = false)
+    private Boolean isLoggedIn = Boolean.FALSE;
+
+    @Column(name = "IsTracking", nullable = false)
+    private Boolean isTracking = Boolean.FALSE;
+
+    @Column(name = "LastLogin")
+    private LocalDateTime lastLogin;
+
+    @Column(name = "LastLogout")
+    private LocalDateTime lastLogout;
 
     public Long getUserId() {
         return userId;
@@ -103,5 +120,37 @@ public class User {
 
     public void setStatus(UserStatus status) {
         this.status = status;
+    }
+
+    public Boolean getIsLoggedIn() {
+        return isLoggedIn;
+    }
+
+    public void setIsLoggedIn(Boolean isLoggedIn) {
+        this.isLoggedIn = isLoggedIn;
+    }
+
+    public Boolean getIsTracking() {
+        return isTracking;
+    }
+
+    public void setIsTracking(Boolean isTracking) {
+        this.isTracking = isTracking;
+    }
+
+    public LocalDateTime getLastLogin() {
+        return lastLogin;
+    }
+
+    public void setLastLogin(LocalDateTime lastLogin) {
+        this.lastLogin = lastLogin;
+    }
+
+    public LocalDateTime getLastLogout() {
+        return lastLogout;
+    }
+
+    public void setLastLogout(LocalDateTime lastLogout) {
+        this.lastLogout = lastLogout;
     }
 }

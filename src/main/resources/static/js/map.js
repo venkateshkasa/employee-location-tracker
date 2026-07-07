@@ -5,6 +5,7 @@ const MapManager = {
     adminMarkers: {},
     routePolyline: null,
     selectedEmployeeMarker: null,
+    selectedEmployeeId: null,
 
     initEmployeeMap(lat, lng) {
         if (this.employeeMap) {
@@ -42,6 +43,7 @@ const MapManager = {
 
         this.adminMarkers = {};
         this.selectedEmployeeMarker = null;
+        this.selectedEmployeeId = null;
     },
 
     updateEmployeeMarker(lat, lng, popupContent) {
@@ -75,8 +77,22 @@ const MapManager = {
         Object.values(this.adminMarkers).forEach(marker => this.adminMap.removeLayer(marker));
         this.adminMarkers = {};
 
-        employees.forEach(emp => {
-            if (emp.latitude && emp.longitude) {
+        // When the admin has focused on one employee (via the View button), keep
+        // showing only that employee on every refresh instead of snapping back to
+        // every marker - use "Show All" to return to the full view.
+        const visibleEmployees = this.selectedEmployeeId
+            ? employees.filter(emp => String(emp.userId) === String(this.selectedEmployeeId))
+            : employees;
+
+        visibleEmployees.forEach(emp => {
+            if (emp.latitude != null && emp.longitude != null) {
+                if (this.selectedEmployeeId && String(emp.userId) === String(this.selectedEmployeeId) && this.selectedEmployeeMarker) {
+                    // Keep the highlighted marker itself live rather than layering a
+                    // second plain marker on top of it at the same coordinates.
+                    this.selectedEmployeeMarker.setLatLng([emp.latitude, emp.longitude]);
+                    return;
+                }
+
                 const popup = `
                     <strong>${emp.employeeName || emp.name}</strong><br>
                     Status: ${emp.status || emp.trackingStatus}<br>
@@ -93,7 +109,17 @@ const MapManager = {
     },
 
     focusOnEmployee(employee) {
-        if (!this.adminMap || !employee.latitude || !employee.longitude) return;
+        if (!this.adminMap) return false;
+        if (employee.latitude == null || employee.longitude == null) return false;
+
+        this.selectedEmployeeId = employee.userId;
+
+        // Drop any plain marker already drawn for this employee so it isn't
+        // duplicated underneath the highlighted marker below.
+        if (this.adminMarkers[employee.userId]) {
+            this.adminMap.removeLayer(this.adminMarkers[employee.userId]);
+            delete this.adminMarkers[employee.userId];
+        }
 
         const lat = employee.latitude;
         const lng = employee.longitude;
@@ -126,6 +152,20 @@ const MapManager = {
         this.selectedEmployeeMarker.openPopup();
 
         document.getElementById('mapTitle').textContent = `Viewing: ${employee.name}`;
+        return true;
+    },
+
+    showAllEmployees() {
+        this.selectedEmployeeId = null;
+        if (this.selectedEmployeeMarker && this.adminMap) {
+            this.adminMap.removeLayer(this.selectedEmployeeMarker);
+        }
+        this.selectedEmployeeMarker = null;
+
+        const titleEl = document.getElementById('mapTitle');
+        if (titleEl) {
+            titleEl.textContent = 'Employee Live Locations';
+        }
     },
 
     createPopupContent(name, time, lat, lng, status) {

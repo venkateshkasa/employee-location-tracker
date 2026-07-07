@@ -48,7 +48,7 @@ public class AdminService {
         for (User employee : employees) {
             Optional<EmployeeLocation> latest = locationRepository.findTopByUserIdOrderByLocationTimeDesc(employee.getUserId());
             TrackingStatus status = locationService.determineTrackingStatus(
-                    employee.getUserId(),
+                    employee,
                     latest.orElse(null)
             );
             if (status == TrackingStatus.OFFLINE) {
@@ -88,6 +88,13 @@ public class AdminService {
         List<LocationResponse> locations = new ArrayList<>();
 
         for (User employee : employees) {
+            // A "live" marker implies the employee is actually logged in right now.
+            // Without this check, an employee who logged out days ago would still
+            // show a marker on the map from their last stored location.
+            if (!Boolean.TRUE.equals(employee.getIsLoggedIn())) {
+                continue;
+            }
+
             locationRepository.findTopByUserIdOrderByLocationTimeDesc(employee.getUserId())
                     .ifPresent(loc -> {
                         try {
@@ -116,7 +123,7 @@ public class AdminService {
             dto.setLatitude(loc.getLatitude().doubleValue());
             dto.setLongitude(loc.getLongitude().doubleValue());
             dto.setLastUpdated(loc.getLocationTime().format(FORMATTER));
-            dto.setTrackingStatus(locationService.determineTrackingStatus(employee.getUserId(), loc).name());
+            dto.setTrackingStatus(locationService.determineTrackingStatus(employee, loc).name());
         } else {
             dto.setTrackingStatus(TrackingStatus.OFFLINE.name());
             dto.setLastUpdated("Never");

@@ -35,20 +35,25 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/",
                                 "/index.html",
-                                "/dashboard.html",
                                 "/css/**",
                                 "/js/**",
                                 "/images/**",
+                                "/icons/**",
+                                "/manifest.json",
+                                "/service-worker.js",
                                 "/favicon.ico"
                         ).permitAll()
 
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 
+                        // The dashboard must never be reachable without a valid, authenticated session.
+                        .requestMatchers("/dashboard", "/dashboard.html").authenticated()
+
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         .requestMatchers("/api/**").authenticated()
 
-                        .anyRequest().permitAll()
+                        .anyRequest().authenticated()
                 )
 
                 .formLogin(form -> form.disable())

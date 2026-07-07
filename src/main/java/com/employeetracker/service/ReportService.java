@@ -103,17 +103,10 @@ public class ReportService {
                 })
                 .collect(Collectors.toList()));
 
-        report.setStops(stops.stream()
-                .map(stop -> locationService.getTodayStops(userId).stream()
-                        .filter(s -> s.getStopId().equals(stop.getStopId()))
-                        .findFirst()
-                        .orElse(null))
-                .filter(s -> s != null)
-                .collect(Collectors.toList()));
-
-        if (report.getStops().isEmpty()) {
-            report.setStops(locationService.getTodayStops(userId));
-        }
+        // Use the requested report date, not "today" - the previous implementation
+        // cross-referenced against getTodayStops(), so any historical (non-today)
+        // report silently ended up showing today's stops instead of its own date's.
+        report.setStops(locationService.getStopsForDate(userId, date));
 
         report.setActivities(activities.stream().map(a -> {
             ActivityDto dto = new ActivityDto();

@@ -11,6 +11,8 @@ public class StopDto {
     private String endTime;
     private String duration;
     private int durationSeconds;
+    private String address;
+    private String googleMapsUrl;
 
     public Long getStopId() {
         return stopId;
@@ -82,5 +84,21 @@ public class StopDto {
 
     public void setDurationSeconds(int durationSeconds) {
         this.durationSeconds = durationSeconds;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public String getGoogleMapsUrl() {
+        return googleMapsUrl;
+    }
+
+    public void setGoogleMapsUrl(String googleMapsUrl) {
+        this.googleMapsUrl = googleMapsUrl;
     }
 }

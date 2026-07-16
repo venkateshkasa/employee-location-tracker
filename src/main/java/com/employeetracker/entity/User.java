@@ -43,20 +43,41 @@ public class User {
     @Column(name = "Status", nullable = false, length = 20)
     private UserStatus status = UserStatus.ACTIVE;
 
-    // Authoritative login/tracking state. Employee status must be derived from
-    // these flags (not merely from the presence of an old location row) so that
-    // an employee is never shown as ONLINE/MOVING unless they are actually logged in.
     @Column(name = "IsLoggedIn", nullable = false)
-    private Boolean isLoggedIn = Boolean.FALSE;
+    private boolean loggedIn = false;
 
-    @Column(name = "IsTracking", nullable = false)
-    private Boolean isTracking = Boolean.FALSE;
+    @Column(name = "TrackingEnabled", nullable = false)
+    private boolean trackingEnabled = false;
 
-    @Column(name = "LastLogin")
-    private LocalDateTime lastLogin;
+    @Column(name = "PhotoUrl", length = 500)
+    private String photoUrl;
 
-    @Column(name = "LastLogout")
-    private LocalDateTime lastLogout;
+    @Column(name = "Phone", length = 30)
+    private String phone;
+
+    @Column(name = "Department", length = 100)
+    private String department;
+
+    @Column(name = "Designation", length = 100)
+    private String designation;
+
+    @Column(name = "Manager", length = 150)
+    private String manager;
+
+    @Column(name = "InsideOffice", nullable = false)
+    private boolean insideOffice = false;
+
+    @Column(name = "CurrentOfficeName", length = 150)
+    private String currentOfficeName;
+
+    @Column(name = "PasswordResetToken", length = 100)
+    private String passwordResetToken;
+
+    @Column(name = "LastLoginTime")
+    private LocalDateTime lastLoginTime;
+
+    @Column(name = "LastLogoutTime")
+    private LocalDateTime lastLogoutTime;
 
     public Long getUserId() {
         return userId;
@@ -122,35 +143,99 @@ public class User {
         this.status = status;
     }
 
-    public Boolean getIsLoggedIn() {
-        return isLoggedIn;
+    public boolean isLoggedIn() {
+        return loggedIn;
     }
 
-    public void setIsLoggedIn(Boolean isLoggedIn) {
-        this.isLoggedIn = isLoggedIn;
+    public void setLoggedIn(boolean loggedIn) {
+        this.loggedIn = loggedIn;
     }
 
-    public Boolean getIsTracking() {
-        return isTracking;
+    public boolean isTrackingEnabled() {
+        return trackingEnabled;
     }
 
-    public void setIsTracking(Boolean isTracking) {
-        this.isTracking = isTracking;
+    public void setTrackingEnabled(boolean trackingEnabled) {
+        this.trackingEnabled = trackingEnabled;
     }
 
-    public LocalDateTime getLastLogin() {
-        return lastLogin;
+    public String getPhotoUrl() {
+        return photoUrl;
     }
 
-    public void setLastLogin(LocalDateTime lastLogin) {
-        this.lastLogin = lastLogin;
+    public void setPhotoUrl(String photoUrl) {
+        this.photoUrl = photoUrl;
     }
 
-    public LocalDateTime getLastLogout() {
-        return lastLogout;
+    public String getPhone() {
+        return phone;
     }
 
-    public void setLastLogout(LocalDateTime lastLogout) {
-        this.lastLogout = lastLogout;
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public String getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(String department) {
+        this.department = department;
+    }
+
+    public String getDesignation() {
+        return designation;
+    }
+
+    public void setDesignation(String designation) {
+        this.designation = designation;
+    }
+
+    public String getManager() {
+        return manager;
+    }
+
+    public void setManager(String manager) {
+        this.manager = manager;
+    }
+
+    public boolean isInsideOffice() {
+        return insideOffice;
+    }
+
+    public void setInsideOffice(boolean insideOffice) {
+        this.insideOffice = insideOffice;
+    }
+
+    public String getCurrentOfficeName() {
+        return currentOfficeName;
+    }
+
+    public void setCurrentOfficeName(String currentOfficeName) {
+        this.currentOfficeName = currentOfficeName;
+    }
+
+    public String getPasswordResetToken() {
+        return passwordResetToken;
+    }
+
+    public void setPasswordResetToken(String passwordResetToken) {
+        this.passwordResetToken = passwordResetToken;
+    }
+
+    public LocalDateTime getLastLoginTime() {
+        return lastLoginTime;
+    }
+
+    public void setLastLoginTime(LocalDateTime lastLoginTime) {
+        this.lastLoginTime = lastLoginTime;
+    }
+
+    public LocalDateTime getLastLogoutTime() {
+        return lastLogoutTime;
+    }
+
+    public void setLastLogoutTime(LocalDateTime lastLogoutTime) {
+        this.lastLogoutTime = lastLogoutTime;
     }
 }

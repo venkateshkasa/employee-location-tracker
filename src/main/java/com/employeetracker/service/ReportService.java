@@ -46,24 +46,33 @@ public class ReportService {
     private final EmployeeActivityRepository activityRepository;
     private final DistanceCalculationService distanceCalculationService;
     private final LocationService locationService;
+    private final SimplePdfService simplePdfService;
 
     public ReportService(UserRepository userRepository,
                          EmployeeLocationRepository locationRepository,
                          EmployeeStopRepository stopRepository,
                          EmployeeActivityRepository activityRepository,
                          DistanceCalculationService distanceCalculationService,
-                         LocationService locationService) {
+                         LocationService locationService,
+                         SimplePdfService simplePdfService) {
         this.userRepository = userRepository;
         this.locationRepository = locationRepository;
         this.stopRepository = stopRepository;
         this.activityRepository = activityRepository;
         this.distanceCalculationService = distanceCalculationService;
         this.locationService = locationService;
+        this.simplePdfService = simplePdfService;
     }
 
-    public ReportDto generateReport(Long userId, LocalDate date) {
-        if (date == null) {
-            date = LocalDate.now();
+    public ReportDto generateReport(Long userId, LocalDate fromDate, LocalDate toDate) {
+        if (fromDate == null) {
+            fromDate = LocalDate.now();
+        }
+        if (toDate == null) {
+            toDate = LocalDate.now();
+        }
+        if (fromDate.isAfter(toDate)) {
+            throw new BadRequestException("From Date must not be after To Date");
         }
 
         User user = userRepository.findById(userId)
@@ -73,20 +82,19 @@ public class ReportService {
             throw new BadRequestException("Reports are generated for employees only");
         }
 
-        LocalDateTime start = DateTimeUtil.startOfDay(date);
-        LocalDateTime end = DateTimeUtil.endOfDay(date);
+        LocalDateTime start = DateTimeUtil.startOfDay(fromDate);
+        LocalDateTime end = DateTimeUtil.endOfDay(toDate);
 
         List<EmployeeLocation> locations = locationRepository.findTodayLocations(userId, start, end);
-        List<EmployeeStop> stops = stopRepository.findUserStopsInRange(userId, start, end);
         List<EmployeeActivity> activities = activityRepository.findTodayActivities(userId, start, end);
 
         ReportDto report = new ReportDto();
-        report.setReportDate(date.format(DATE_FORMATTER));
+        report.setFromDate(fromDate.format(DATE_FORMATTER));
+        report.setToDate(toDate.format(DATE_FORMATTER));
         report.setUserId(user.getUserId());
         report.setEmployeeName(user.getName());
         report.setEmployeeId(user.getEmployeeId());
-        report.setTotalDistanceKm(distanceCalculationService.calculateDistanceKm(userId, date));
-        report.setTotalStops(stops.size());
+        report.setTotalDistanceKm(distanceCalculationService.calculateDistanceKm(userId, fromDate, toDate));
         report.setTotalLocationUpdates(locations.size());
 
         report.setLocations(locations.stream()
@@ -99,14 +107,17 @@ public class ReportService {
                     lr.setLongitude(loc.getLongitude());
                     lr.setAccuracy(loc.getAccuracy());
                     lr.setLocationTime(loc.getLocationTime().format(DATETIME_FORMATTER));
+                    String address = loc.getAddress();
+                    lr.setAddress((address != null && !address.isBlank()) ? address : "Unknown Address");
                     return lr;
                 })
                 .collect(Collectors.toList()));
 
-        // Use the requested report date, not "today" - the previous implementation
+        // Use the requested report date range, not "today" - the previous implementation
         // cross-referenced against getTodayStops(), so any historical (non-today)
-        // report silently ended up showing today's stops instead of its own date's.
-        report.setStops(locationService.getStopsForDate(userId, date));
+        // report silently ended up showing today's stops instead of its own range's.
+        report.setStops(locationService.getStopsForRange(userId, fromDate, toDate));
+        report.setTotalStops(report.getStops().size());
 
         report.setActivities(activities.stream().map(a -> {
             ActivityDto dto = new ActivityDto();
@@ -126,23 +137,26 @@ public class ReportService {
         return report;
     }
 
-    public List<ReportDto> generateAllEmployeeReports(LocalDate date) {
-        if (date == null) {
-            date = LocalDate.now();
+    public List<ReportDto> generateAllEmployeeReports(LocalDate fromDate, LocalDate toDate) {
+        if (fromDate == null) {
+            fromDate = LocalDate.now();
+        }
+        if (toDate == null) {
+            toDate = LocalDate.now();
         }
 
         List<User> employees = userRepository.findByRole(UserRole.EMPLOYEE);
         List<ReportDto> reports = new ArrayList<>();
 
         for (User employee : employees) {
-            reports.add(generateReport(employee.getUserId(), date));
+            reports.add(generateReport(employee.getUserId(), fromDate, toDate));
         }
 
         return reports;
     }
 
-    public byte[] exportReportToExcel(Long userId, LocalDate date) throws IOException {
-        ReportDto report = generateReport(userId, date);
+    public byte[] exportReportToExcel(Long userId, LocalDate fromDate, LocalDate toDate) throws IOException {
+        ReportDto report = generateReport(userId, fromDate, toDate);
 
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             CellStyle headerStyle = createHeaderStyle(workbook);
@@ -164,6 +178,10 @@ public class ReportService {
         }
     }
 
+    public byte[] exportReportToPdf(Long userId, LocalDate fromDate, LocalDate toDate) {
+        return simplePdfService.buildReportPdf(generateReport(userId, fromDate, toDate));
+    }
+
     private CellStyle createHeaderStyle(Workbook workbook) {
         CellStyle style = workbook.createCellStyle();
         Font font = workbook.createFont();
@@ -174,7 +192,8 @@ public class ReportService {
 
     private void createSummarySheet(Sheet sheet, ReportDto report, CellStyle headerStyle) {
         String[][] data = {
-                {"Report Date", report.getReportDate()},
+                {"From Date", report.getFromDate()},
+                {"To Date", report.getToDate()},
                 {"Employee ID", report.getEmployeeId()},
                 {"Employee Name", report.getEmployeeName()},
                 {"Total Distance (km)", String.valueOf(report.getTotalDistanceKm())},
@@ -196,7 +215,7 @@ public class ReportService {
 
     private void createLocationsSheet(Sheet sheet, ReportDto report, CellStyle headerStyle) {
         Row header = sheet.createRow(0);
-        String[] columns = {"Location ID", "Latitude", "Longitude", "Accuracy", "Time"};
+        String[] columns = {"Location ID", "Latitude", "Longitude", "Accuracy", "Address", "Time"};
         for (int i = 0; i < columns.length; i++) {
             Cell cell = header.createCell(i);
             cell.setCellValue(columns[i]);
@@ -210,7 +229,8 @@ public class ReportService {
             row.createCell(1).setCellValue(loc.getLatitude().doubleValue());
             row.createCell(2).setCellValue(loc.getLongitude().doubleValue());
             row.createCell(3).setCellValue(loc.getAccuracy() != null ? loc.getAccuracy().doubleValue() : 0);
-            row.createCell(4).setCellValue(loc.getLocationTime());
+            row.createCell(4).setCellValue(loc.getAddress() != null && !loc.getAddress().isBlank() ? loc.getAddress() : "Unknown Address");
+            row.createCell(5).setCellValue(loc.getLocationTime());
         }
 
         for (int i = 0; i < columns.length; i++) {
@@ -220,7 +240,7 @@ public class ReportService {
 
     private void createStopsSheet(Sheet sheet, ReportDto report, CellStyle headerStyle) {
         Row header = sheet.createRow(0);
-        String[] columns = {"Stop ID", "Latitude", "Longitude", "Start Time", "End Time", "Duration"};
+        String[] columns = {"Stop ID", "Latitude", "Longitude", "Address", "Start Time", "End Time", "Duration", "Google Maps Link"};
         for (int i = 0; i < columns.length; i++) {
             Cell cell = header.createCell(i);
             cell.setCellValue(columns[i]);
@@ -233,9 +253,11 @@ public class ReportService {
             row.createCell(0).setCellValue(stop.getStopId());
             row.createCell(1).setCellValue(stop.getLatitude());
             row.createCell(2).setCellValue(stop.getLongitude());
-            row.createCell(3).setCellValue(stop.getStartTime());
-            row.createCell(4).setCellValue(stop.getEndTime() != null ? stop.getEndTime() : "Ongoing");
-            row.createCell(5).setCellValue(stop.getDuration() != null ? stop.getDuration() : "");
+            row.createCell(3).setCellValue(stop.getAddress() != null ? stop.getAddress() : "");
+            row.createCell(4).setCellValue(stop.getStartTime());
+            row.createCell(5).setCellValue(stop.getEndTime() != null ? stop.getEndTime() : "Ongoing");
+            row.createCell(6).setCellValue(stop.getDuration() != null ? stop.getDuration() : "");
+            row.createCell(7).setCellValue(stop.getGoogleMapsUrl() != null ? stop.getGoogleMapsUrl() : "");
         }
 
         for (int i = 0; i < columns.length; i++) {

@@ -31,6 +31,21 @@ public class EmployeeLocation {
     @Column(name = "Accuracy", precision = 10, scale = 2)
     private BigDecimal accuracy;
 
+    @Column(name = "InsideOffice", nullable = false)
+    private boolean insideOffice = false;
+
+    @Column(name = "OfficeName", length = 150)
+    private String officeName;
+
+    @Column(name = "Address", length = 500)
+    private String address;
+
+    @Column(name = "SpeedKmph", precision = 10, scale = 2)
+    private BigDecimal speedKmph;
+
+    @Column(name = "MovementType", length = 30)
+    private String movementType;
+
     @Column(name = "LocationTime", nullable = false)
     private LocalDateTime locationTime;
 
@@ -72,6 +87,46 @@ public class EmployeeLocation {
 
     public void setAccuracy(BigDecimal accuracy) {
         this.accuracy = accuracy;
+    }
+
+    public boolean isInsideOffice() {
+        return insideOffice;
+    }
+
+    public void setInsideOffice(boolean insideOffice) {
+        this.insideOffice = insideOffice;
+    }
+
+    public String getOfficeName() {
+        return officeName;
+    }
+
+    public void setOfficeName(String officeName) {
+        this.officeName = officeName;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public BigDecimal getSpeedKmph() {
+        return speedKmph;
+    }
+
+    public void setSpeedKmph(BigDecimal speedKmph) {
+        this.speedKmph = speedKmph;
+    }
+
+    public String getMovementType() {
+        return movementType;
+    }
+
+    public void setMovementType(String movementType) {
+        this.movementType = movementType;
     }
 
     public LocalDateTime getLocationTime() {

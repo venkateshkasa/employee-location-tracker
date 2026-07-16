@@ -13,6 +13,13 @@ public class LocationResponse {
     private String locationTime;
     private String status;
     private double todayDistanceKm;
+    private boolean trackingEnabled;
+    private boolean insideOffice;
+    private String officeName;
+    private String address;
+    private Double speedKmph;
+    private String movementType;
+    private String lastSeen;
 
     public Long getLocationId() {
         return locationId;
@@ -84,5 +91,61 @@ public class LocationResponse {
 
     public void setTodayDistanceKm(double todayDistanceKm) {
         this.todayDistanceKm = todayDistanceKm;
+    }
+
+    public boolean isTrackingEnabled() {
+        return trackingEnabled;
+    }
+
+    public void setTrackingEnabled(boolean trackingEnabled) {
+        this.trackingEnabled = trackingEnabled;
+    }
+
+    public boolean isInsideOffice() {
+        return insideOffice;
+    }
+
+    public void setInsideOffice(boolean insideOffice) {
+        this.insideOffice = insideOffice;
+    }
+
+    public String getOfficeName() {
+        return officeName;
+    }
+
+    public void setOfficeName(String officeName) {
+        this.officeName = officeName;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public Double getSpeedKmph() {
+        return speedKmph;
+    }
+
+    public void setSpeedKmph(Double speedKmph) {
+        this.speedKmph = speedKmph;
+    }
+
+    public String getMovementType() {
+        return movementType;
+    }
+
+    public void setMovementType(String movementType) {
+        this.movementType = movementType;
+    }
+
+    public String getLastSeen() {
+        return lastSeen;
+    }
+
+    public void setLastSeen(String lastSeen) {
+        this.lastSeen = lastSeen;
     }
 }

@@ -72,8 +72,20 @@ const API = {
         return this.get('/api/auth/me');
     },
 
+    async changePassword(currentPassword, newPassword) {
+        return this.post('/api/auth/change-password', { currentPassword, newPassword });
+    },
+
+    async forgotPassword(email) {
+        return this.post('/api/auth/forgot-password', { email });
+    },
+
     async saveLocation(latitude, longitude, accuracy) {
         return this.post('/api/location/save', { latitude, longitude, accuracy });
+    },
+
+    async setTracking(enabled) {
+        return this.post('/api/location/tracking', { enabled });
     },
 
     async getCurrentLocation() {
@@ -97,6 +109,27 @@ const API = {
         return this.get('/api/location/activities');
     },
 
+    async getMyReport(fromDate, toDate) {
+        const params = new URLSearchParams();
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        return this.get('/api/employee/report?' + params.toString());
+    },
+
+    async exportMyReport(fromDate, toDate) {
+        const params = new URLSearchParams();
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        return this.request('/api/employee/report/export?' + params.toString(), { method: 'GET' });
+    },
+
+    async exportMyReportPdf(fromDate, toDate) {
+        const params = new URLSearchParams();
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        return this.request('/api/employee/report/export/pdf?' + params.toString(), { method: 'GET' });
+    },
+
     async getAdminSummary() {
         return this.get('/api/admin/summary');
     },
@@ -113,16 +146,72 @@ const API = {
         return this.get('/api/admin/live-locations');
     },
 
-    async getReport(userId, date) {
+    async getAdminNotifications() {
+        return this.get('/api/admin/notifications');
+    },
+
+    async getReport(userId, fromDate, toDate) {
         const params = new URLSearchParams();
         if (userId) params.append('userId', userId);
-        if (date) params.append('date', date);
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
         return this.get('/api/admin/report?' + params.toString());
     },
 
-    async exportReport(userId, date) {
+    async exportReport(userId, fromDate, toDate) {
         const params = new URLSearchParams({ userId });
-        if (date) params.append('date', date);
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
         return this.request('/api/admin/report/export?' + params.toString(), { method: 'GET' });
+    },
+
+    async exportReportPdf(userId, fromDate, toDate) {
+        const params = new URLSearchParams({ userId });
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        return this.request('/api/admin/report/export/pdf?' + params.toString(), { method: 'GET' });
+    },
+
+    async getNearbyPlaces({ latitude, longitude, radius } = {}) {
+        if (latitude !== undefined && longitude !== undefined && radius !== undefined) {
+            const params = new URLSearchParams({ latitude, longitude, radius });
+            return this.get('/api/places/nearby?' + params.toString());
+        }
+        return this.get('/api/places/nearby');
+    },
+
+    async getNearbyPlacesHistory(start, end) {
+        const params = new URLSearchParams();
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+        return this.get('/api/places/history?' + params.toString());
+    },
+
+    async getNotifications() {
+        return this.get('/api/notifications');
+    },
+
+    async getUnreadNotifications() {
+        return this.get('/api/notifications/unread');
+    },
+
+    async getUnreadCount() {
+        return this.get('/api/notifications/unread/count');
+    },
+
+    async markNotificationAsRead(notificationId) {
+        return this.post(`/api/notifications/${notificationId}/read`, {});
+    },
+
+    async markAllNotificationsAsRead() {
+        return this.post('/api/notifications/read-all', {});
+    },
+
+    async getAdminNearbyPlaces({ userId, latitude, longitude, radius } = {}) {
+        if (userId !== undefined && latitude !== undefined && longitude !== undefined && radius !== undefined) {
+            const params = new URLSearchParams({ userId, latitude, longitude, radius });
+            return this.get('/api/admin/nearby-places?' + params.toString());
+        }
+        return this.get('/api/admin/nearby-places');
     }
 };

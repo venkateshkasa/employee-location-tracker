@@ -1,8 +1,10 @@
 package com.employeetracker.controller;
 
 import com.employeetracker.dto.ApiResponse;
+import com.employeetracker.dto.ForgotPasswordRequest;
 import com.employeetracker.dto.LoginRequest;
 import com.employeetracker.dto.LoginResponse;
+import com.employeetracker.dto.PasswordChangeRequest;
 import com.employeetracker.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -40,5 +42,20 @@ public class AuthController {
     public ResponseEntity<ApiResponse<LoginResponse>> getCurrentUser() {
         LoginResponse response = authService.getCurrentUser();
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody PasswordChangeRequest request) {
+        authService.changePassword(request);
+        return ResponseEntity.ok(ApiResponse.success("Password changed successfully", null));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<String>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        String token = authService.requestPasswordReset(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.success(
+                "Email is not configured. Placeholder reset token generated for admin/testing use.",
+                token
+        ));
     }
 }

@@ -17,4 +17,6 @@ public interface EmployeeActivityRepository extends JpaRepository<EmployeeActivi
     List<EmployeeActivity> findTodayActivities(@Param("userId") Long userId,
                                                @Param("start") LocalDateTime start,
                                                @Param("end") LocalDateTime end);
+
+    List<EmployeeActivity> findTop20ByActivityTypeInOrderByActivityTimeDesc(List<com.employeetracker.entity.ActivityType> activityTypes);
 }

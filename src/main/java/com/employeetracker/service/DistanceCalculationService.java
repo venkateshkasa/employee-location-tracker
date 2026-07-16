@@ -20,12 +20,12 @@ public class DistanceCalculationService {
     }
 
     public double calculateTodayDistanceKm(Long userId) {
-        return calculateDistanceKm(userId, LocalDate.now());
+        return calculateDistanceKm(userId, LocalDate.now(), LocalDate.now());
     }
 
-    public double calculateDistanceKm(Long userId, LocalDate date) {
-        LocalDateTime start = DateTimeUtil.startOfDay(date);
-        LocalDateTime end = DateTimeUtil.endOfDay(date);
+    public double calculateDistanceKm(Long userId, LocalDate fromDate, LocalDate toDate) {
+        LocalDateTime start = DateTimeUtil.startOfDay(fromDate);
+        LocalDateTime end = DateTimeUtil.endOfDay(toDate);
         List<EmployeeLocation> locations = locationRepository.findTodayLocations(userId, start, end);
 
         if (locations.size() < 2) {

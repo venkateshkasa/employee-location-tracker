@@ -3,9 +3,11 @@ package com.employeetracker.service;
 import com.employeetracker.config.CustomUserDetailsService;
 import com.employeetracker.dto.LoginRequest;
 import com.employeetracker.dto.LoginResponse;
+import com.employeetracker.dto.PasswordChangeRequest;
 import com.employeetracker.entity.ActivityType;
 import com.employeetracker.entity.User;
 import com.employeetracker.entity.UserRole;
+import com.employeetracker.exception.BadRequestException;
 import com.employeetracker.exception.UnauthorizedException;
 import com.employeetracker.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,11 +20,13 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Service
 public class AuthService {
@@ -34,17 +38,20 @@ public class AuthService {
     private final ActivityService activityService;
     private final UserRepository userRepository;
     private final StopDetectionService stopDetectionService;
+    private final PasswordEncoder passwordEncoder;
 
     public AuthService(AuthenticationManager authenticationManager,
                        CustomUserDetailsService userDetailsService,
                        ActivityService activityService,
                        UserRepository userRepository,
-                       StopDetectionService stopDetectionService) {
+                       StopDetectionService stopDetectionService,
+                       PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.activityService = activityService;
         this.userRepository = userRepository;
         this.stopDetectionService = stopDetectionService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -72,13 +79,12 @@ public class AuthService {
 
         User user = getUserEntity(authentication);
 
-        // Employee must appear OFFLINE by default and only become ONLINE after a
-        // successful login - track that here rather than inferring it from
-        // whatever location row happens to already be in the database.
-        user.setIsLoggedIn(true);
-        user.setIsTracking(false);
-        user.setLastLogin(LocalDateTime.now());
-        userRepository.save(user);
+        if (user.getRole() == UserRole.EMPLOYEE) {
+            user.setLoggedIn(true);
+            user.setTrackingEnabled(true);
+            user.setLastLoginTime(LocalDateTime.now());
+            userRepository.save(user);
+        }
 
         HttpSession session = httpRequest.getSession(true);
         session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
@@ -87,11 +93,13 @@ public class AuthService {
         // Activity logging is a "nice to have" audit trail - it must never be allowed
         // to break an otherwise successful login.
         try {
-            if (user.getRole() == UserRole.EMPLOYEE) {
-                activityService.logActivity(user.getUserId(), ActivityType.LOGIN, "Employee logged in", null, null, null);
-            } else {
-                activityService.logActivity(user.getUserId(), ActivityType.LOGIN, "Admin logged in", null, null, null);
-            }
+                if (user.getRole() == UserRole.EMPLOYEE) {
+                    activityService.logActivity(user.getUserId(), ActivityType.LOGIN, "Employee logged in", null, null, null);
+                    activityService.logActivity(user.getUserId(), ActivityType.TRACKING_ENABLED, "Tracking enabled", null, null, null);
+                    activityService.logActivity(user.getUserId(), ActivityType.CHECK_IN, "Check In detected from tracking", null, null, null);
+                } else {
+                    activityService.logActivity(user.getUserId(), ActivityType.LOGIN, "Admin logged in", null, null, null);
+                }
         } catch (Exception ex) {
             log.warn("Failed to record login activity for user {}", user.getUserId(), ex);
         }
@@ -126,21 +134,18 @@ public class AuthService {
         }
 
         if (user != null) {
-            // GPS tracking must stop and the employee must immediately become
-            // OFFLINE on logout - never leave the previous ONLINE/MOVING state
-            // hanging around for the admin dashboard to pick up.
             try {
-                LocalDateTime now = LocalDateTime.now();
-                stopDetectionService.closeOpenStopForUser(user.getUserId(), now);
-                user.setIsLoggedIn(false);
-                user.setIsTracking(false);
-                user.setLastLogout(now);
-                userRepository.save(user);
-            } catch (Exception ex) {
-                log.warn("Failed to update tracking state on logout for user {}", user.getUserId(), ex);
-            }
-
-            try {
+                if (user.getRole() == UserRole.EMPLOYEE) {
+                    if (user.isTrackingEnabled()) {
+                        activityService.logActivity(user.getUserId(), ActivityType.TRACKING_DISABLED, "Tracking disabled", null, null, null);
+                    }
+                    user.setLoggedIn(false);
+                    user.setTrackingEnabled(false);
+                    user.setLastLogoutTime(LocalDateTime.now());
+                    userRepository.save(user);
+                    stopDetectionService.closeOpenStopForUser(user.getUserId(), LocalDateTime.now());
+                    activityService.logActivity(user.getUserId(), ActivityType.CHECK_OUT, "Check Out detected from tracking", null, null, null);
+                }
                 activityService.logActivity(user.getUserId(), ActivityType.LOGOUT, "User logged out", null, null, null);
             } catch (Exception ex) {
                 log.warn("Failed to record logout activity for user {}", user.getUserId(), ex);
@@ -152,6 +157,29 @@ public class AuthService {
             session.invalidate();
         }
         SecurityContextHolder.clearContext();
+    }
+
+    @Transactional
+    public void changePassword(PasswordChangeRequest request) {
+        User user = getCurrentUserEntity();
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new BadRequestException("Current password is incorrect");
+        }
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        activityService.logActivity(user.getUserId(), ActivityType.PASSWORD_CHANGED, "Password changed", null, null, null);
+    }
+
+    @Transactional
+    public String requestPasswordReset(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadRequestException("No account found for the supplied email"));
+        String token = UUID.randomUUID().toString();
+        user.setPasswordResetToken(token);
+        userRepository.save(user);
+        activityService.logActivity(user.getUserId(), ActivityType.PASSWORD_RESET_REQUESTED,
+                "Password reset requested. Email service is not configured; reset token generated.", null, null, null);
+        return token;
     }
 
     private User getUserEntity(Authentication authentication) {
@@ -166,6 +194,13 @@ public class AuthService {
         response.setEmail(user.getEmail());
         response.setUsername(user.getUsername());
         response.setRole(user.getRole().name());
+        response.setLoggedIn(user.isLoggedIn());
+        response.setTrackingEnabled(user.isTrackingEnabled());
+        response.setPhotoUrl(user.getPhotoUrl());
+        response.setPhone(user.getPhone());
+        response.setDepartment(user.getDepartment());
+        response.setDesignation(user.getDesignation());
+        response.setManager(user.getManager());
         return response;
     }
 }

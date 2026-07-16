@@ -4,23 +4,39 @@ import java.util.List;
 
 public class ReportDto {
 
-    private String reportDate;
+    private String fromDate;
+    private String toDate;
     private Long userId;
     private String employeeName;
     private String employeeId;
     private double totalDistanceKm;
     private int totalStops;
     private int totalLocationUpdates;
+    private String checkInTime;
+    private String checkOutTime;
+    private String totalWorkingHours;
+    private String totalIdleTime;
+    private double dailyDistanceKm;
+    private double weeklyDistanceKm;
+    private double monthlyDistanceKm;
     private List<LocationResponse> locations;
     private List<StopDto> stops;
     private List<ActivityDto> activities;
 
-    public String getReportDate() {
-        return reportDate;
+    public String getFromDate() {
+        return fromDate;
     }
 
-    public void setReportDate(String reportDate) {
-        this.reportDate = reportDate;
+    public void setFromDate(String fromDate) {
+        this.fromDate = fromDate;
+    }
+
+    public String getToDate() {
+        return toDate;
+    }
+
+    public void setToDate(String toDate) {
+        this.toDate = toDate;
     }
 
     public Long getUserId() {
@@ -69,6 +85,62 @@ public class ReportDto {
 
     public void setTotalLocationUpdates(int totalLocationUpdates) {
         this.totalLocationUpdates = totalLocationUpdates;
+    }
+
+    public String getCheckInTime() {
+        return checkInTime;
+    }
+
+    public void setCheckInTime(String checkInTime) {
+        this.checkInTime = checkInTime;
+    }
+
+    public String getCheckOutTime() {
+        return checkOutTime;
+    }
+
+    public void setCheckOutTime(String checkOutTime) {
+        this.checkOutTime = checkOutTime;
+    }
+
+    public String getTotalWorkingHours() {
+        return totalWorkingHours;
+    }
+
+    public void setTotalWorkingHours(String totalWorkingHours) {
+        this.totalWorkingHours = totalWorkingHours;
+    }
+
+    public String getTotalIdleTime() {
+        return totalIdleTime;
+    }
+
+    public void setTotalIdleTime(String totalIdleTime) {
+        this.totalIdleTime = totalIdleTime;
+    }
+
+    public double getDailyDistanceKm() {
+        return dailyDistanceKm;
+    }
+
+    public void setDailyDistanceKm(double dailyDistanceKm) {
+        this.dailyDistanceKm = dailyDistanceKm;
+    }
+
+    public double getWeeklyDistanceKm() {
+        return weeklyDistanceKm;
+    }
+
+    public void setWeeklyDistanceKm(double weeklyDistanceKm) {
+        this.weeklyDistanceKm = weeklyDistanceKm;
+    }
+
+    public double getMonthlyDistanceKm() {
+        return monthlyDistanceKm;
+    }
+
+    public void setMonthlyDistanceKm(double monthlyDistanceKm) {
+        this.monthlyDistanceKm = monthlyDistanceKm;
     }
 
     public List<LocationResponse> getLocations() {

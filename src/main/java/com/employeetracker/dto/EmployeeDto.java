@@ -9,7 +9,20 @@ public class EmployeeDto {
     private String status;
     private String trackingStatus;
     private double todayDistanceKm;
+    private double weeklyDistanceKm;
+    private double monthlyDistanceKm;
     private String lastUpdated;
+    private String lastSeen;
+    private String photoUrl;
+    private String phone;
+    private String department;
+    private String designation;
+    private String manager;
+    private boolean insideOffice;
+    private String officeName;
+    private String address;
+    private Double speedKmph;
+    private String movementType;
     private Double latitude;
     private Double longitude;
 
@@ -69,12 +82,116 @@ public class EmployeeDto {
         this.todayDistanceKm = todayDistanceKm;
     }
 
+    public double getWeeklyDistanceKm() {
+        return weeklyDistanceKm;
+    }
+
+    public void setWeeklyDistanceKm(double weeklyDistanceKm) {
+        this.weeklyDistanceKm = weeklyDistanceKm;
+    }
+
+    public double getMonthlyDistanceKm() {
+        return monthlyDistanceKm;
+    }
+
+    public void setMonthlyDistanceKm(double monthlyDistanceKm) {
+        this.monthlyDistanceKm = monthlyDistanceKm;
+    }
+
     public String getLastUpdated() {
         return lastUpdated;
     }
 
     public void setLastUpdated(String lastUpdated) {
         this.lastUpdated = lastUpdated;
+    }
+
+    public String getLastSeen() {
+        return lastSeen;
+    }
+
+    public void setLastSeen(String lastSeen) {
+        this.lastSeen = lastSeen;
+    }
+
+    public String getPhotoUrl() {
+        return photoUrl;
+    }
+
+    public void setPhotoUrl(String photoUrl) {
+        this.photoUrl = photoUrl;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public String getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(String department) {
+        this.department = department;
+    }
+
+    public String getDesignation() {
+        return designation;
+    }
+
+    public void setDesignation(String designation) {
+        this.designation = designation;
+    }
+
+    public String getManager() {
+        return manager;
+    }
+
+    public void setManager(String manager) {
+        this.manager = manager;
+    }
+
+    public boolean isInsideOffice() {
+        return insideOffice;
+    }
+
+    public void setInsideOffice(boolean insideOffice) {
+        this.insideOffice = insideOffice;
+    }
+
+    public String getOfficeName() {
+        return officeName;
+    }
+
+    public void setOfficeName(String officeName) {
+        this.officeName = officeName;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public Double getSpeedKmph() {
+        return speedKmph;
+    }
+
+    public void setSpeedKmph(Double speedKmph) {
+        this.speedKmph = speedKmph;
+    }
+
+    public String getMovementType() {
+        return movementType;
+    }
+
+    public void setMovementType(String movementType) {
+        this.movementType = movementType;
     }
 
     public Double getLatitude() {

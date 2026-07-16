@@ -9,7 +9,7 @@ public class TrackingProperties {
     @Value("${tracking.stop.radius-meters:30}")
     private double stopRadiusMeters;
 
-    @Value("${tracking.stop.duration-minutes:10}")
+    @Value("${tracking.stop.duration-minutes:15}")
     private int stopDurationMinutes;
 
     @Value("${tracking.online.threshold-minutes:15}")

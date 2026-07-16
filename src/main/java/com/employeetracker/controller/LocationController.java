@@ -37,6 +37,7 @@ public class LocationController {
 
     @PostMapping("/save")
     public ResponseEntity<ApiResponse<LocationResponse>> saveLocation(@Valid @RequestBody LocationRequest request) {
+        System.out.println("===== SAVE LOCATION API HIT =====");
         User user = authService.getCurrentUserEntity();
         LocationResponse response = locationService.saveLocation(user.getUserId(), request);
         return ResponseEntity.ok(ApiResponse.success("Location saved successfully", response));
@@ -47,6 +48,15 @@ public class LocationController {
         User user = authService.getCurrentUserEntity();
         LocationResponse response = locationService.getCurrentLocation(user.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/tracking")
+    public ResponseEntity<ApiResponse<LocationResponse>> setTracking(@RequestBody Map<String, Boolean> request) {
+         System.out.println("===== TRACKING API HIT =====");
+        User user = authService.getCurrentUserEntity();
+        boolean enabled = Boolean.TRUE.equals(request.get("enabled"));
+        LocationResponse response = locationService.setTrackingEnabled(user.getUserId(), enabled);
+        return ResponseEntity.ok(ApiResponse.success(enabled ? "Tracking enabled" : "Tracking disabled", response));
     }
 
     @GetMapping("/history")

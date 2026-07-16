@@ -3,6 +3,18 @@ package com.employeetracker.entity;
 public enum ActivityType {
     LOGIN,
     LOGOUT,
+    TRACKING_ENABLED,
+    TRACKING_DISABLED,
     LOCATION_UPDATE,
-    STOP
+    STOP_STARTED,
+    STOP_ENDED,
+    STOP,
+    ENTERED_OFFICE,
+    EXITED_OFFICE,
+    CHECK_IN,
+    CHECK_OUT,
+    REPORT_GENERATED,
+    ADMIN_ACTION,
+    PASSWORD_CHANGED,
+    PASSWORD_RESET_REQUESTED
 }

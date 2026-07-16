@@ -37,6 +37,9 @@ public class EmployeeStop {
     @Column(name = "Duration")
     private Integer duration;
 
+    @Column(name = "Address", length = 500)
+    private String address;
+
     public Long getStopId() {
         return stopId;
     }
@@ -91,5 +94,13 @@ public class EmployeeStop {
 
     public void setDuration(Integer duration) {
         this.duration = duration;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
     }
 }

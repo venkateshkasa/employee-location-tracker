@@ -9,7 +9,6 @@ import com.employeetracker.util.GeoUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -49,19 +48,17 @@ public class StopDetectionService {
         );
 
         if (withinRadius) {
-            handlePotentialStop(userId, currentLocation, previous, openStop, durationMinutes);
+            handlePotentialStop(userId, currentLocation, openStop, durationMinutes);
         } else {
             closeOpenStopIfExists(openStop, currentLocation.getLocationTime());
         }
     }
 
-    private void handlePotentialStop(Long userId, EmployeeLocation currentLocation, EmployeeLocation previousLocation,
+    private void handlePotentialStop(Long userId, EmployeeLocation currentLocation,
                                      Optional<EmployeeStop> openStop, int durationMinutes) {
         if (openStop.isPresent()) {
             EmployeeStop stop = openStop.get();
-            long minutesElapsed = Duration.between(stop.getStartTime(), currentLocation.getLocationTime()).toMinutes();
-            if (minutesElapsed >= durationMinutes && stop.getEndTime() == null) {
-                // Stop is confirmed - already open, update duration if employee still stopped
+            if (stop.getEndTime() == null) {
                 int durationSeconds = (int) Duration.between(stop.getStartTime(), currentLocation.getLocationTime()).getSeconds();
                 stop.setDuration(durationSeconds);
                 stopRepository.save(stop);
@@ -73,16 +70,13 @@ public class StopDetectionService {
         newStop.setUserId(userId);
         newStop.setLatitude(currentLocation.getLatitude());
         newStop.setLongitude(currentLocation.getLongitude());
-        // "Within radius" means the employee hadn't moved since the previous ping,
-        // so the stop actually started back then - anchoring on currentLocation's
-        // time would understate every stop's duration by roughly one update interval.
-        newStop.setStartTime(previousLocation.getLocationTime());
+        newStop.setStartTime(currentLocation.getLocationTime());
         EmployeeStop saved = stopRepository.save(newStop);
 
         activityService.logActivity(
                 userId,
-                ActivityType.STOP,
-                "Employee stopped",
+                ActivityType.STOP_STARTED,
+                "Stop started",
                 currentLocation.getLatitude(),
                 currentLocation.getLongitude(),
                 saved.getStopId()
@@ -103,19 +97,23 @@ public class StopDetectionService {
         stop.setEndTime(endTime);
         int durationSeconds = (int) Duration.between(stop.getStartTime(), endTime).getSeconds();
         stop.setDuration(durationSeconds);
-        stopRepository.save(stop);
+        EmployeeStop saved = stopRepository.save(stop);
+        activityService.logActivity(
+                saved.getUserId(),
+                ActivityType.STOP_ENDED,
+                "Stop ended",
+                saved.getLatitude(),
+                saved.getLongitude(),
+                saved.getStopId()
+        );
     }
 
-    /**
-     * Closes any stop that is still open for this user (EndTime is null).
-     * Must be called on logout: since stops are only meaningful while an employee
-     * is actively tracked, an in-progress stop left open after logout would keep
-     * showing as "ongoing" indefinitely and would corrupt future duration reads.
-     */
     @Transactional
     public void closeOpenStopForUser(Long userId, LocalDateTime endTime) {
-        Optional<EmployeeStop> openStop = stopRepository.findTopByUserIdAndEndTimeIsNullOrderByStartTimeDesc(userId);
-        closeOpenStopIfExists(openStop, endTime);
+        closeOpenStopIfExists(
+                stopRepository.findTopByUserIdAndEndTimeIsNullOrderByStartTimeDesc(userId),
+                endTime
+        );
     }
 
     public boolean isCurrentlyStopped(Long userId) {

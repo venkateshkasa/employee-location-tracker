@@ -210,13 +210,14 @@ async function initEmployeeDashboard() {
     // Load Dashboard
     // ===========================
 
-    // If tracking is enabled, a fresh GPS reading is about to be captured
-    // below (see "Start Tracking"). Skip painting the map/marker from
-    // whatever location happens to already be stored in the DB - it may
-    // belong to a previous login from a completely different city/device -
-    // and let the fresh reading populate it instead. Non-location widgets
-    // (distance, stops, activities, route history) still load normally.
-    await loadEmployeeData({ skipLocationDisplay: trackingEnabled });
+    // A fresh GPS reading is about to be captured below (see "Start
+    // Tracking") regardless of whether tracking is currently ON or OFF for
+    // this employee. Always skip painting the map/marker from whatever
+    // location happens to already be stored in the DB - it may belong to a
+    // previous login from a completely different city/device - and let the
+    // fresh reading populate it instead. Non-location widgets (distance,
+    // stops, activities, route history) still load normally.
+    await loadEmployeeData({ skipLocationDisplay: true });
 
     // ===========================
     // Notification System
@@ -302,16 +303,31 @@ async function initEmployeeDashboard() {
     }
 
     // ===========================
-    // Start Tracking
+    // Fresh Location On Login
     // ===========================
+    // Never leave the previous device/city's stored coordinates on screen
+    // after a login. A brand new GPS reading is requested immediately,
+    // regardless of the employee's persisted tracking ON/OFF preference:
+    //   - If tracking is ON, the fresh fix is saved to the EmployeeLocation
+    //     table (via captureAndSaveLocation) and the periodic auto-update
+    //     interval is started, exactly as before.
+    //   - If tracking is OFF, the fresh fix is still fetched and shown on
+    //     the employee's own map for their own reference, but - to keep the
+    //     tracking toggle's existing meaning intact - it is NOT written to
+    //     the EmployeeLocation table and is NOT visible to admins, since
+    //     that still requires tracking to be turned on.
+
+    setLocationPendingUI();
 
     if (trackingEnabled) {
-
-        setLocationPendingUI();
 
         await captureAndSaveLocation();
 
         startLocationInterval();
+
+    } else {
+
+        await captureFreshLocationForDisplayOnly();
 
     }
 
@@ -823,6 +839,72 @@ async function captureAndSaveLocation() {
         if (btn) {
             btn.disabled = !trackingEnabled;
             btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Location';
+        }
+    }
+}
+
+/**
+ * Used on login when the employee's tracking toggle is currently OFF.
+ * Fetches one brand new GPS reading (same maximumAge: 0 guarantee as
+ * captureAndSaveLocation) purely to show the employee their real current
+ * position instead of whatever was last stored in the DB - but, unlike
+ * captureAndSaveLocation, it never calls the save API, so the
+ * EmployeeLocation table and the admin dashboard are untouched while
+ * tracking remains off. This preserves the existing meaning of the
+ * tracking toggle: turning it on is still what starts persisted/admin-
+ * visible tracking.
+ */
+async function captureFreshLocationForDisplayOnly() {
+    if (trackingEnabled) {
+        // Tracking was turned on while this was pending - let the regular
+        // captureAndSaveLocation/interval path take over instead.
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        setLocationUnavailableUI('Geolocation is not supported by this browser.');
+        return;
+    }
+
+    try {
+        const position = await getFreshGpsPosition();
+
+        if (trackingEnabled) {
+            // Tracking got turned on mid-flight; captureAndSaveLocation
+            // already owns display + saving now.
+            return;
+        }
+
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        document.getElementById('currentStatus').innerHTML =
+            '<span class="status-badge status-offline">TRACKING OFF</span>';
+        document.getElementById('currentLat').textContent = lat.toFixed(6);
+        document.getElementById('currentLng').textContent = lng.toFixed(6);
+        document.getElementById('lastUpdated').textContent = 'Current device location (not being tracked)';
+
+        const popup = MapManager.createPopupContent(
+            currentUser.name,
+            'Now',
+            lat.toFixed(6),
+            lng.toFixed(6),
+            'OFFLINE'
+        );
+        MapManager.updateEmployeeMarker(lat, lng, popup, 'OFFLINE');
+        lastEmployeeLocation = { lat, lng };
+    } catch (error) {
+        console.error('Geolocation error:', error);
+
+        if (error && error.code === 1) {
+            setLocationUnavailableUI('Location access denied. Enable location permissions to see your current position.');
+        } else {
+            // GPS not ready yet - keep retrying quietly until it is, same
+            // as the tracking-enabled path.
+            setLocationUnavailableUI('Waiting for GPS signal...');
+            if (!trackingEnabled) {
+                setTimeout(captureFreshLocationForDisplayOnly, GPS_RETRY_DELAY_MS);
+            }
         }
     }
 }

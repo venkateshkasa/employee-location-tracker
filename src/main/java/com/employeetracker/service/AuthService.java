@@ -62,6 +62,10 @@ public class AuthService {
                     new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
             );
         } catch (AuthenticationException ex) {
+            // Server-side diagnostic only - the client always gets the same generic
+            // message below, so this does not change any external behavior.
+            log.warn("Login failed for username '{}': {} - {}",
+                    request.getUsername(), ex.getClass().getSimpleName(), ex.getMessage());
             // Do not leak whether the username exists or the password was wrong.
             throw new UnauthorizedException("Invalid username or password");
         }

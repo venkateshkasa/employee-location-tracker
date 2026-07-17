@@ -3,8 +3,17 @@ let locationInterval = null;
 let trackingEnabled = false;
 let notificationInterval = null;
 let adminNotificationInterval = null;
+let adminDataInterval = null;
 let distanceChartInstance = null;
 const AUTO_UPDATE_MINUTES = 10;
+
+// Admin dashboard "real-time" sync: since there's no push channel (no
+// WebSocket/SSE) between employee and admin, we keep the admin's view in
+// sync by polling the existing admin endpoints frequently enough that a
+// Tracking ON/OFF change made by an employee (which is written to the DB
+// immediately by /api/location/tracking) shows up on the admin dashboard
+// within 1-2 seconds, with no page refresh needed.
+const ADMIN_LIVE_POLL_MS = 1500;
 
 // Nearby Colleges / geofence radius state (Show Nearby Colleges works only
 // while tracking is ON; see updateNearbyControlsState/toggleNearbyPlaces).
@@ -23,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentUser = response.data;
         trackingEnabled = Boolean(currentUser.trackingEnabled);
         initializeDashboard();
+        setupDesktopAutoLogout();
     } catch (e) {
         window.location.href = '/index.html';
     }
@@ -34,6 +44,76 @@ document
     .getElementById("darkModeBtn")
     .addEventListener("click", toggleDarkMode);
 });
+
+// ==========================================================
+// Desktop Auto Logout
+//
+// When the browser/tab/window is closed on Desktop, the session should be
+// logged out automatically: activity saved, employee status set to
+// Offline, and the session invalidated. /api/auth/logout already does all
+// three (see AuthService#logout) and is CSRF-exempt, so on desktop we just
+// need to reliably fire that request as the page is torn down - which is
+// exactly what navigator.sendBeacon() is for (fetch() is not reliable
+// during unload since the browser can abort it before it completes).
+//
+// On mobile, closing the browser/app or sending it to the background must
+// NOT log the user out - the session should continue normally - so these
+// listeners are only ever attached when isDesktopDevice() is true.
+// ==========================================================
+
+let autoLogoutBeaconSent = false;
+
+/**
+ * Heuristic used only to decide whether the "close tab/browser -> auto
+ * logout" behavior applies. Real mobile browsers (phones/tablets,
+ * including iPadOS which reports as a Mac but exposes touch points)
+ * are excluded so the mobile session-continuity requirement holds.
+ */
+function isDesktopDevice() {
+    const ua = navigator.userAgent || navigator.vendor || '';
+    const mobileRegex = /Android|iPhone|iPod|iPad|BlackBerry|IEMobile|Opera Mini|Mobile|webOS/i;
+    if (mobileRegex.test(ua)) {
+        return false;
+    }
+    // iPadOS 13+ identifies as "Macintosh" but has multi-touch support.
+    if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) {
+        return false;
+    }
+    return true;
+}
+
+function sendDesktopLogoutBeacon() {
+    if (autoLogoutBeaconSent) return;
+    autoLogoutBeaconSent = true;
+
+    try {
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon('/api/auth/logout');
+        } else {
+            // Fallback for the rare desktop browser without Beacon support.
+            fetch('/api/auth/logout', { method: 'POST', keepalive: true, credentials: 'include' });
+        }
+    } catch (e) {
+        // Best-effort only - never let this throw during page teardown.
+    }
+}
+
+function setupDesktopAutoLogout() {
+    if (!isDesktopDevice()) return;
+
+    // 'pagehide' fires reliably on tab close/window close/navigation and,
+    // unlike 'unload', still allows sendBeacon(); event.persisted is true
+    // when the page is going into the back/forward cache rather than
+    // actually closing, so skip the beacon in that case.
+    window.addEventListener('pagehide', (event) => {
+        if (!event.persisted) {
+            sendDesktopLogoutBeacon();
+        }
+    });
+
+    // 'beforeunload' is kept as a fallback for older desktop browsers.
+    window.addEventListener('beforeunload', sendDesktopLogoutBeacon);
+}
 
 async function initializeDashboard() {
     document.getElementById('navUserInfo').textContent = `${currentUser.name} (${currentUser.role})`;
@@ -745,7 +825,7 @@ async function initAdminDashboard() {
     }
 
     await loadAdminData();
-    setInterval(loadAdminData, 60000);
+    adminDataInterval = setInterval(loadAdminData, ADMIN_LIVE_POLL_MS);
 
     // Admin Notifications card (e.g. employees entering nearby colleges).
     // Polls independently of loadAdminData so new alerts show up quickly.
@@ -838,7 +918,11 @@ function applyEmployeeFilters() {
     renderEmployeeTable(filtered);
 }
 
+let adminDataLoadInFlight = false;
+
 async function loadAdminData() {
+    if (adminDataLoadInFlight) return;
+    adminDataLoadInFlight = true;
     try {
         const [summaryRes, employeesRes, liveRes, nearbyRes] = await Promise.all([
             API.getAdminSummary(),
@@ -887,6 +971,8 @@ async function loadAdminData() {
         }
     } catch (error) {
         console.error('Error loading admin data:', error);
+    } finally {
+        adminDataLoadInFlight = false;
     }
 }
 
@@ -1121,12 +1207,22 @@ async function exportReport() {
 
 async function handleLogout() {
 
+    // Session is about to be invalidated by the explicit logout below, so
+    // suppress the desktop auto-logout beacon that would otherwise also
+    // fire when this navigation away from the dashboard triggers pagehide.
+    autoLogoutBeaconSent = true;
+
     // Stop location updates
     stopLocationInterval();
 
     // Stop notification polling
     stopNotificationPolling();
     stopAdminNotificationPolling();
+
+    if (adminDataInterval) {
+        clearInterval(adminDataInterval);
+        adminDataInterval = null;
+    }
 
     try {
 

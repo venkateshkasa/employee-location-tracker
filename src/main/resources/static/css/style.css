@@ -55,6 +55,11 @@
 
 html { scroll-behavior: smooth; }
 
+/* Belt-and-braces guard against accidental page-level horizontal scroll
+   (e.g. a flex row that doesn't wrap on very narrow viewports). This has
+   no visible effect wherever content already fits, i.e. desktop. */
+html, body { max-width: 100%; overflow-x: hidden; }
+
 /* ==========================================================
    BASE / BACKGROUND — soft floating gradient blobs
    ========================================================== */
@@ -975,6 +980,65 @@ input[type="search"],
         inset:auto 10px auto auto !important;
 
         z-index:99999 !important;
+    }
+
+    /* ---- Navbar: let the brand and the action buttons wrap onto their
+       own row instead of being squeezed/clipped in one line. ---- */
+    .navbar .container-fluid{
+        flex-wrap: wrap;
+        row-gap: 0.5rem;
+    }
+
+    .navbar .container-fluid > .d-flex{
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.5rem !important;
+    }
+
+    /* ---- Live Map card header: title, tracking buttons, refresh,
+       radius select and "Show Nearby Colleges" all need to wrap onto
+       new rows instead of overflowing the card width. ---- */
+    #employeeSection .card-header.d-flex{
+        flex-wrap: wrap;
+        row-gap: 0.6rem;
+    }
+
+    #employeeSection .card-header.d-flex > div{
+        width: 100%;
+    }
+
+    #employeeSection .map-toolbar{
+        flex-wrap: wrap;
+        width: 100%;
+        row-gap: 0.5rem;
+    }
+
+    #employeeSection .map-toolbar .btn,
+    #employeeSection .map-toolbar select{
+        flex: 0 1 auto;
+        white-space: normal;
+    }
+
+    /* ---- Admin "Show Nearby Colleges" button (appended next to the
+       map title, which has no flex wrapper of its own): keep it from
+       ever exceeding the card width on narrow screens. ---- */
+    #adminSection .card-header .btn{
+        max-width: 100%;
+        white-space: normal;
+        margin-top: 0.5rem;
+    }
+
+    /* ---- Cards / map: make sure nothing forces the page wider than
+       the viewport. ---- */
+    .card, .stat-card{
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .map-container,
+    #map,
+    #adminMap{
+        max-width: 100%;
     }
 }
 /* ==========================================================

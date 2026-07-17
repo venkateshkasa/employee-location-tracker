@@ -937,6 +937,20 @@ input[type="search"],
     .card-body { padding: 1.15rem; }
     .stat-card:hover { transform: translateY(-3px); }
     .hero-panel { padding: 1.35rem 1.4rem; }
+
+    /* Notification dropdown: keep it fully inside the viewport on mobile.
+       !important is required only here to override the element's inline
+       style (width:360px; max-height:450px; overflow-y:auto;) set in
+       dashboard.html - desktop's inline/CSS behavior is untouched since
+       this rule only applies under the 768px breakpoint. */
+    #notificationList {
+        left: auto !important;
+        right: 10px !important;
+        width: min(90vw, 360px) !important;
+        max-height: 70vh !important;
+        overflow-y: auto !important;
+        z-index: 9999 !important;
+    }
 }
 
 /* ==========================================================

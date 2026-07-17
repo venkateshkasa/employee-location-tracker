@@ -210,7 +210,13 @@ async function initEmployeeDashboard() {
     // Load Dashboard
     // ===========================
 
-    await loadEmployeeData();
+    // If tracking is enabled, a fresh GPS reading is about to be captured
+    // below (see "Start Tracking"). Skip painting the map/marker from
+    // whatever location happens to already be stored in the DB - it may
+    // belong to a previous login from a completely different city/device -
+    // and let the fresh reading populate it instead. Non-location widgets
+    // (distance, stops, activities, route history) still load normally.
+    await loadEmployeeData({ skipLocationDisplay: trackingEnabled });
 
     // ===========================
     // Notification System
@@ -300,6 +306,8 @@ async function initEmployeeDashboard() {
     // ===========================
 
     if (trackingEnabled) {
+
+        setLocationPendingUI();
 
         await captureAndSaveLocation();
 
@@ -479,7 +487,8 @@ function stopLocationInterval() {
     }
 }
 
-async function loadEmployeeData() {
+async function loadEmployeeData(options = {}) {
+    const { skipLocationDisplay = false } = options;
     try {
         const [locationRes, distanceRes, stopsRes, activitiesRes, historyRes] = await Promise.all([
             API.getCurrentLocation().catch(() => null),
@@ -489,7 +498,7 @@ async function loadEmployeeData() {
             API.getLocationHistory(new Date().toISOString().split('T')[0]).catch(() => null)
         ]);
 
-        if (locationRes && locationRes.success) {
+        if (!skipLocationDisplay && locationRes && locationRes.success) {
             updateEmployeeUI(locationRes.data);
         }
 
@@ -687,12 +696,81 @@ async function toggleTracking(enable) {
 
 }
 
+// How long to wait before automatically retrying when GPS is temporarily
+// unavailable (error.code 2) or a fix times out (error.code 3). Permission
+// denial (error.code 1) is never retried automatically - the user has to
+// grant access first.
+const GPS_RETRY_DELAY_MS = 5000;
+
+/**
+ * Wraps navigator.geolocation.getCurrentPosition in a real Promise so
+ * callers can actually await a fresh GPS fix instead of the callback firing
+ * asynchronously after the caller has already moved on.
+ * maximumAge: 0 forces the browser to take a brand new reading rather than
+ * reusing any cached position - this is what guarantees the app never shows
+ * a location left over from a previous login/device/city.
+ */
+function getFreshGpsPosition() {
+    return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+            resolve,
+            reject,
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+    });
+}
+
+/**
+ * Shown while a fresh GPS reading is being obtained (e.g. right after
+ * login). Deliberately does NOT display any previously stored coordinates.
+ */
+function setLocationPendingUI() {
+    const statusEl = document.getElementById('currentStatus');
+    const latEl = document.getElementById('currentLat');
+    const lngEl = document.getElementById('currentLng');
+    const updatedEl = document.getElementById('lastUpdated');
+    if (!statusEl || !latEl || !lngEl || !updatedEl) return;
+
+    statusEl.innerHTML = '<span class="status-badge status-online">LOCATING...</span>';
+    latEl.textContent = '-';
+    lngEl.textContent = '-';
+    updatedEl.textContent = 'Fetching current location...';
+
+    if (MapManager.clearEmployeeMarker) {
+        MapManager.clearEmployeeMarker();
+    }
+}
+
+/**
+ * Shown when GPS cannot be used right now (permission denied, or the
+ * device reported an error). Explicitly clears the displayed
+ * lat/lng/marker so the UI never keeps showing an old, no-longer-current
+ * location as though it were live.
+ */
+function setLocationUnavailableUI(message) {
+    const statusEl = document.getElementById('currentStatus');
+    const latEl = document.getElementById('currentLat');
+    const lngEl = document.getElementById('currentLng');
+    const updatedEl = document.getElementById('lastUpdated');
+    if (!statusEl || !latEl || !lngEl || !updatedEl) return;
+
+    statusEl.innerHTML = '<span class="status-badge status-offline">LOCATION UNAVAILABLE</span>';
+    latEl.textContent = '-';
+    lngEl.textContent = '-';
+    updatedEl.textContent = message;
+
+    if (MapManager.clearEmployeeMarker) {
+        MapManager.clearEmployeeMarker();
+    }
+}
+
 async function captureAndSaveLocation() {
     if (!trackingEnabled) {
         return;
     }
 
     if (!navigator.geolocation) {
+        setLocationUnavailableUI('Geolocation is not supported by this browser.');
         alert('Geolocation is not supported by your browser.');
         return;
     }
@@ -703,42 +781,50 @@ async function captureAndSaveLocation() {
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Updating...';
     }
 
-    navigator.geolocation.getCurrentPosition(
-        async (position) => {
-            try {
-                if (!trackingEnabled) return;
+    try {
+        // Force a brand new GPS reading (maximumAge: 0 inside
+        // getFreshGpsPosition) - never reuse a cached/previous position.
+        const position = await getFreshGpsPosition();
 
-                const response = await API.saveLocation(
-                    position.coords.latitude,
-                    position.coords.longitude,
-                    position.coords.accuracy
-                );
+        if (!trackingEnabled) return;
 
-                if (response.success) {
-                    updateEmployeeUI(response.data);
-                    await loadEmployeeData();
-                }
-            } catch (error) {
-                console.error('Error saving location:', error);
-            } finally {
-                if (btn) {
-                    btn.disabled = !trackingEnabled;
-                    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Location';
-                }
+        const response = await API.saveLocation(
+            position.coords.latitude,
+            position.coords.longitude,
+            position.coords.accuracy
+        );
+
+        if (response.success) {
+            // Immediately reflect the fresh location on the employee's own
+            // map; the admin dashboard picks it up on its next poll
+            // (ADMIN_LIVE_POLL_MS), which already refreshes automatically.
+            updateEmployeeUI(response.data);
+            await loadEmployeeData();
+        }
+    } catch (error) {
+        console.error('Geolocation error:', error);
+
+        if (error && error.code === 1) {
+            // PERMISSION_DENIED - do not fall back to the old stored
+            // location; make it clear no current location is available.
+            setLocationUnavailableUI('Location access denied. Enable location permissions to update your position.');
+            alert('GPS permission denied. Please enable location access to track your position.');
+        } else {
+            // POSITION_UNAVAILABLE (2) or TIMEOUT (3) - GPS could not
+            // produce a fix right now. Keep the UI honest about that and
+            // retry automatically in the background until a fresh reading
+            // succeeds.
+            setLocationUnavailableUI('Waiting for GPS signal...');
+            if (trackingEnabled) {
+                setTimeout(captureAndSaveLocation, GPS_RETRY_DELAY_MS);
             }
-        },
-        (error) => {
-            console.error('Geolocation error:', error);
-            if (btn) {
-                btn.disabled = !trackingEnabled;
-                btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Location';
-            }
-            if (error.code === 1) {
-                alert('GPS permission denied. Please enable location access to track your position.');
-            }
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = !trackingEnabled;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Location';
+        }
+    }
 }
 
 function renderActivityTimeline(activities) {

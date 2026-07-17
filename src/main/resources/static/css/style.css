@@ -932,27 +932,51 @@ input[type="search"],
 /* ==========================================================
    RESPONSIVE
    ========================================================== */
-@media (max-width: 768px) {
-    .map-container { height: 350px; }
-    .card-body { padding: 1.15rem; }
-    .stat-card:hover { transform: translateY(-3px); }
-    .hero-panel { padding: 1.35rem 1.4rem; }
+@media (max-width:768px){
 
-    /* Notification dropdown: keep it fully inside the viewport on mobile.
-       !important is required only here to override the element's inline
-       style (width:360px; max-height:450px; overflow-y:auto;) set in
-       dashboard.html - desktop's inline/CSS behavior is untouched since
-       this rule only applies under the 768px breakpoint. */
-    #notificationList {
-        left: auto !important;
-        right: 10px !important;
-        width: min(90vw, 360px) !important;
-        max-height: 70vh !important;
-        overflow-y: auto !important;
-        z-index: 9999 !important;
+    .map-container{
+        height:350px;
+    }
+
+    .card-body{
+        padding:1.15rem;
+    }
+
+    .stat-card:hover{
+        transform:translateY(-3px);
+    }
+
+    .hero-panel{
+        padding:1.35rem 1.4rem;
+    }
+
+    .navbar,
+    .navbar .container-fluid{
+        overflow:visible !important;
+    }
+
+    .dropdown{
+        position:static !important;
+    }
+
+    #notificationList{
+        position:fixed !important;
+        top:65px !important;
+        right:10px !important;
+        left:auto !important;
+
+        width:calc(100vw - 20px) !important;
+        max-width:360px !important;
+
+        max-height:70vh !important;
+        overflow-y:auto !important;
+
+        transform:none !important;
+        inset:auto 10px auto auto !important;
+
+        z-index:99999 !important;
     }
 }
-
 /* ==========================================================
    DARK MODE — deep space glass with neon-soft accents
    ========================================================== */

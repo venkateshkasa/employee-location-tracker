@@ -13,6 +13,11 @@ public class StopDto {
     private int durationSeconds;
     private String address;
     private String googleMapsUrl;
+    private String employeeId;
+    private String stopReason;
+    private String stopReasonLabel;
+    private String remarks;
+    private boolean manual;
 
     public Long getStopId() {
         return stopId;
@@ -100,5 +105,45 @@ public class StopDto {
 
     public void setGoogleMapsUrl(String googleMapsUrl) {
         this.googleMapsUrl = googleMapsUrl;
+    }
+
+    public String getEmployeeId() {
+        return employeeId;
+    }
+
+    public void setEmployeeId(String employeeId) {
+        this.employeeId = employeeId;
+    }
+
+    public String getStopReason() {
+        return stopReason;
+    }
+
+    public void setStopReason(String stopReason) {
+        this.stopReason = stopReason;
+    }
+
+    public String getStopReasonLabel() {
+        return stopReasonLabel;
+    }
+
+    public void setStopReasonLabel(String stopReasonLabel) {
+        this.stopReasonLabel = stopReasonLabel;
+    }
+
+    public String getRemarks() {
+        return remarks;
+    }
+
+    public void setRemarks(String remarks) {
+        this.remarks = remarks;
+    }
+
+    public boolean isManual() {
+        return manual;
+    }
+
+    public void setManual(boolean manual) {
+        this.manual = manual;
     }
 }

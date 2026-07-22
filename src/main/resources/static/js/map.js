@@ -149,7 +149,8 @@ const MapManager = {
             employee.lastUpdated || 'N/A',
             lat.toFixed(6),
             lng.toFixed(6),
-            employee.trackingStatus || 'OFFLINE'
+            employee.trackingStatus || 'OFFLINE',
+            employee.distanceFromOfficeKm
         );
 
         this.selectedEmployeeId = employeeId;
@@ -206,13 +207,16 @@ const MapManager = {
         });
     },
 
-   createPopupContent(name, time, lat, lng, status) {
+   createPopupContent(name, time, lat, lng, status, distanceFromOfficeKm) {
+    const distanceLine = (distanceFromOfficeKm === undefined || distanceFromOfficeKm === null)
+        ? ''
+        : `<br>Distance from Office: ${Number(distanceFromOfficeKm).toFixed(2)} km`;
     return `
         <strong>${name}</strong><br>
         Time: ${time}<br>
         Latitude: ${lat}<br>
         Longitude: ${lng}<br>
-        Status: ${status}
+        Status: ${status}${distanceLine}
     `;
 },
 

@@ -10,6 +10,7 @@ import com.employeetracker.entity.EmployeeActivity;
 import com.employeetracker.entity.EmployeeLocation;
 import com.employeetracker.entity.EmployeeStop;
 import com.employeetracker.entity.TrackingStatus;
+import com.employeetracker.entity.TrackingStop;
 import com.employeetracker.entity.User;
 import com.employeetracker.entity.UserRole;
 import com.employeetracker.exception.BadRequestException;
@@ -17,6 +18,7 @@ import com.employeetracker.exception.ResourceNotFoundException;
 import com.employeetracker.repository.EmployeeActivityRepository;
 import com.employeetracker.repository.EmployeeLocationRepository;
 import com.employeetracker.repository.EmployeeStopRepository;
+import com.employeetracker.repository.TrackingStopRepository;
 import com.employeetracker.repository.UserRepository;
 import com.employeetracker.util.DateTimeUtil;
 import org.slf4j.Logger;
@@ -27,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -50,6 +54,8 @@ public class LocationService {
     private final SpeedService speedService;
     private final NearbyPlaceService nearbyPlaceService;
     private final NotificationService notificationService;
+    private final TrackingStopService trackingStopService;
+    private final TrackingStopRepository trackingStopRepository;
 
     public LocationService(EmployeeLocationRepository locationRepository,
                            EmployeeStopRepository stopRepository,
@@ -63,7 +69,9 @@ public class LocationService {
                            OfficeGeofenceService officeGeofenceService,
                            SpeedService speedService,
                            NearbyPlaceService nearbyPlaceService,
-                           NotificationService notificationService) {
+                           NotificationService notificationService,
+                           TrackingStopService trackingStopService,
+                           TrackingStopRepository trackingStopRepository) {
         this.locationRepository = locationRepository;
         this.stopRepository = stopRepository;
         this.activityRepository = activityRepository;
@@ -77,6 +85,8 @@ public class LocationService {
         this.speedService = speedService;
         this.nearbyPlaceService = nearbyPlaceService;
         this.notificationService = notificationService;
+        this.trackingStopService = trackingStopService;
+        this.trackingStopRepository = trackingStopRepository;
     }
 
     @Transactional
@@ -126,10 +136,16 @@ public class LocationService {
                 saved.getLocationId()
         );
 
-        // Detect nearby educational institutions and send notifications
+        // Detect nearby educational institutions and send notifications.
+        // The radius is whatever is currently selected on the employee's
+        // Radius dropdown (LocationRequest#getRadiusMeters(), sent by the
+        // dashboard whenever "Show Nearby Colleges" is on) so the
+        // background notification job always matches the radius used for
+        // the map/circle/nearby search - never a hardcoded default.
         try {
             List<com.employeetracker.dto.NearbyPlaceDto> newNearbyPlaces = 
-                nearbyPlaceService.processLocationUpdate(userId, request.getLatitude(), request.getLongitude());
+                nearbyPlaceService.processLocationUpdate(userId, request.getLatitude(), request.getLongitude(),
+                        request.getRadiusMeters());
             
             // Send notifications for newly detected places
             for (com.employeetracker.dto.NearbyPlaceDto place : newNearbyPlaces) {
@@ -187,7 +203,22 @@ nearbyPlaceService.markAsNotified(place.getPlaceId());
         return distanceCalculationService.calculateTodayDistanceKm(userId);
     }
 
+
+    /**
+     * Updates the employee's LastSeenTime to now. Called by the dashboard's
+     * heartbeat (every 30s while the dashboard is open), regardless of
+     * whether Tracking is currently ON or OFF, so the Admin Dashboard's
+     * Online/Offline status (see determineTrackingStatus) accurately
+     * reflects whether the browser/tab is actually still open and connected.
+     */
     @Transactional
+    public void recordHeartbeat(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        user.setLastSeenTime(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
     public List<StopDto> getTodayStops(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
@@ -195,10 +226,27 @@ nearbyPlaceService.markAsNotified(place.getPlaceId());
         LocalDateTime start = DateTimeUtil.startOfToday();
         LocalDateTime end = DateTimeUtil.endOfToday();
 
-        return stopRepository.findUserStopsInRange(userId, start, end).stream()
+        List<StopDto> autoStops = stopRepository.findUserStopsInRange(userId, start, end).stream()
                 .map(stop -> mapToStopDto(user, stop))
                 .filter(this::meetsMinimumStopDuration)
                 .collect(Collectors.toList());
+
+        // Include today's manually added stops ("+ Add Stop" popup) so they
+        // show up immediately in the employee's own Stop History card, the
+        // same way they are already merged into getStopsForRange() for
+        // reports/admin. Manual stops are always shown regardless of
+        // duration - the minimum-duration noise filter above only applies
+        // to automatic GPS-idle detection.
+        List<StopDto> manualStops = trackingStopRepository.search(userId, start, end, null)
+                .stream()
+                .map(stop -> mapManualStopToDto(user, stop))
+                .collect(Collectors.toList());
+
+        List<StopDto> combined = new ArrayList<>(autoStops);
+        combined.addAll(manualStops);
+        combined.sort(Comparator.comparing(StopDto::getStartTime).reversed());
+
+        return combined;
     }
 
     @Transactional
@@ -210,12 +258,73 @@ nearbyPlaceService.markAsNotified(place.getPlaceId());
     LocalDateTime start = DateTimeUtil.startOfDay(fromDate);
     LocalDateTime end = DateTimeUtil.endOfDay(toDate);
 
-    return stopRepository.findUserStopsInRange(userId, start, end)
+    List<StopDto> autoStops = stopRepository.findUserStopsInRange(userId, start, end)
             .stream()
             .map(stop -> mapToStopDto(user, stop))
             .filter(this::meetsMinimumStopDuration)
             .collect(Collectors.toList());
+
+    // Root cause of Manual Stops missing from Reports / Stop History / Report
+    // Summary / exports: this method only ever read from EmployeeStop (the
+    // automatic GPS-idle stop-detection table). Manual "Tracking OFF" stops
+    // are saved correctly by TrackingStopService into the separate
+    // TrackingStops table, but were never merged in here. Every manual stop
+    // in range must be included regardless of duration (the noise filter
+    // above only applies to automatic GPS-idle detection) and regardless of
+    // whether it is still active/ongoing (EndTime IS NULL).
+    List<StopDto> manualStops = trackingStopRepository.search(userId, start, end, null)
+            .stream()
+            .map(stop -> mapManualStopToDto(user, stop))
+            .collect(Collectors.toList());
+
+    List<StopDto> combined = new ArrayList<>(autoStops);
+    combined.addAll(manualStops);
+    // startTime is formatted "yyyy-MM-dd HH:mm:ss", a fixed-width format
+    // where lexical ordering matches chronological ordering, so sorting the
+    // combined list this way preserves the original most-recent-first order.
+    combined.sort(Comparator.comparing(StopDto::getStartTime).reversed());
+
+    return combined;
 }
+
+    private StopDto mapManualStopToDto(User user, TrackingStop stop) {
+        StopDto dto = new StopDto();
+        dto.setStopId(stop.getStopId());
+        dto.setUserId(stop.getUserId());
+        dto.setEmployeeName(user.getName());
+        dto.setEmployeeId(user.getEmployeeId());
+        if (stop.getLatitude() != null) {
+            dto.setLatitude(stop.getLatitude().doubleValue());
+        }
+        if (stop.getLongitude() != null) {
+            dto.setLongitude(stop.getLongitude().doubleValue());
+        }
+        dto.setStartTime(stop.getStartTime().format(FORMATTER));
+        if (stop.getEndTime() != null) {
+            dto.setEndTime(stop.getEndTime().format(FORMATTER));
+        }
+        if (stop.getDurationMinutes() != null) {
+            int seconds = stop.getDurationMinutes() * 60;
+            dto.setDurationSeconds(seconds);
+            dto.setDuration(DateTimeUtil.formatDuration(seconds));
+        } else {
+            int seconds = (int) java.time.Duration.between(stop.getStartTime(), LocalDateTime.now()).getSeconds();
+            dto.setDurationSeconds(seconds);
+            dto.setDuration(DateTimeUtil.formatDuration(seconds) + " (ongoing)");
+        }
+        dto.setAddress(stop.getAddress() != null && !stop.getAddress().isBlank() ? stop.getAddress() : "Address unavailable");
+        if (stop.getLatitude() != null && stop.getLongitude() != null) {
+            dto.setGoogleMapsUrl("https://www.google.com/maps?q=" + stop.getLatitude().toPlainString()
+                    + "," + stop.getLongitude().toPlainString());
+        }
+        if (stop.getStopReason() != null) {
+            dto.setStopReason(stop.getStopReason().name());
+            dto.setStopReasonLabel(stop.getStopReason().getLabel());
+        }
+        dto.setRemarks(stop.getRemarks());
+        dto.setManual(true);
+        return dto;
+    }
 
     /**
      * Requirement: very small stops (a few seconds, 30 seconds, 2 minutes, etc.)
@@ -273,14 +382,31 @@ nearbyPlaceService.markAsNotified(place.getPlaceId());
                 // latest EmployeeLocation row served no purpose here other than destroying data
                 // needed by reports, the route map, and location-update counts.
                 stopDetectionService.closeOpenStopForUser(userId, LocalDateTime.now());
+            } else {
+                // Tracking Resume requirement: automatically close the employee's active
+                // manual Stop Reason record (if any) and record its Stop End Time/Duration.
+                trackingStopService.closeActiveStopIfExists(userId, LocalDateTime.now());
             }
         }
 
         return buildLocationResponse(user, getLatestLocation(userId).orElse(null));
     }
 
+    // Heartbeat-based Online/Offline fix: if the dashboard has not sent a
+    // heartbeat (see /api/location/heartbeat) within this window, the
+    // employee is treated as Offline even though IsLoggedIn/TrackingEnabled
+    // may still say otherwise - this is exactly the case when the browser
+    // was closed or the connection was lost without a clean logout.
+    private static final long HEARTBEAT_TIMEOUT_SECONDS = 60;
+
     public TrackingStatus determineTrackingStatus(User user, EmployeeLocation location) {
         if (user == null || !user.isLoggedIn() || !user.isTrackingEnabled()) {
+            return TrackingStatus.OFFLINE;
+        }
+
+        LocalDateTime lastSeen = user.getLastSeenTime() != null ? user.getLastSeenTime() : user.getLastLoginTime();
+        if (lastSeen == null
+                || java.time.Duration.between(lastSeen, LocalDateTime.now()).getSeconds() > HEARTBEAT_TIMEOUT_SECONDS) {
             return TrackingStatus.OFFLINE;
         }
 
@@ -349,6 +475,7 @@ nearbyPlaceService.markAsNotified(place.getPlaceId());
         dto.setStopId(stop.getStopId());
         dto.setUserId(stop.getUserId());
         dto.setEmployeeName(user.getName());
+        dto.setEmployeeId(user.getEmployeeId());
         dto.setLatitude(stop.getLatitude().doubleValue());
         dto.setLongitude(stop.getLongitude().doubleValue());
         dto.setStartTime(stop.getStartTime().format(FORMATTER));

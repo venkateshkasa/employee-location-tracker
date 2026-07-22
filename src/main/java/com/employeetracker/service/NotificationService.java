@@ -54,10 +54,18 @@ public class NotificationService {
         List<Notification> recentNotifications =
         notificationRepository.findByUserIdAndIsReadFalseOrderByCreatedAtDesc(userId);
 
+// Admin notifications (createAdminNotification) are created with a null
+// placeName - only per-employee nearby-college notifications carry one.
+// Using Objects.equals() instead of calling .equals() directly on title/
+// message/placeName avoids a NullPointerException whenever any of these
+// fields is null (previously: "Cannot invoke String.equals(Object) because
+// <field> is null", which aborted the whole nearby-place notification loop
+// in LocationService.saveLocation() - including the markAsNotified() call
+// for every place still left in that batch).
 boolean alreadyExists = recentNotifications.stream().anyMatch(n ->
-        n.getTitle().equals(title) &&
-n.getMessage().equals(message) &&
-placeName.equals(n.getPlaceName())
+        Objects.equals(n.getTitle(), title) &&
+        Objects.equals(n.getMessage(), message) &&
+        Objects.equals(n.getPlaceName(), placeName)
 );
 
 if (alreadyExists) {

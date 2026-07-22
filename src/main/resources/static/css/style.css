@@ -363,7 +363,8 @@ a { color: var(--primary-color); }
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color:#fff;
+     
     background: var(--grad-icon-blue);
     box-shadow: 0 10px 22px -8px rgba(79, 70, 229, 0.5);
     transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
@@ -377,7 +378,11 @@ a { color: var(--primary-color); }
     transform: scale(1.08) rotate(-3deg);
     box-shadow: 0 14px 28px -8px rgba(79, 70, 229, 0.6);
 }
-
+.stat-icon i,
+.stat-icon-lg i {
+    color: #ffffff !important;
+    opacity: 1 !important;
+}
 .admin-stat .card-body { padding: 1.65rem; }
 
 /* ==========================================================
@@ -1204,3 +1209,24 @@ body.dark-mode .btn-outline-secondary:hover { background: rgba(255,255,255,0.1);
 body.dark-mode .text-muted { color: #9aa0c3 !important; }
 
 body.dark-mode ::selection { background: rgba(129, 140, 248, 0.3); }
+
+/* ---- Add / Edit Employee modal: keep header & footer fixed, only the
+   body scrolls, capped at 90vh so it always fits laptop/desktop viewports. ---- */
+.employee-form-dialog {
+    max-height: 90vh;
+}
+
+.employee-form-dialog .modal-content {
+    max-height: 90vh;
+    overflow: hidden;
+}
+
+.employee-form-dialog .modal-header,
+.employee-form-dialog .modal-footer {
+    flex-shrink: 0;
+}
+
+.employee-form-dialog .modal-body {
+    overflow-y: auto;
+    max-height: calc(90vh - 130px);
+}

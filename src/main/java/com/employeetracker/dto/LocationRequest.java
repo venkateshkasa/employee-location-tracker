@@ -23,6 +23,15 @@ public class LocationRequest {
     @DecimalMin(value = "0.0", message = "Accuracy cannot be negative")
     private BigDecimal accuracy;
 
+    // Optional: the "Nearby Colleges" radius (in meters) currently selected
+    // on the employee dashboard's Radius dropdown (1/3/5/10 KM). When
+    // present, the background nearby-college detection/notification job
+    // uses this exact radius instead of the server's hardcoded default, so
+    // the radius used for notifications always matches the radius used for
+    // the map/circle/nearby search. Null (radius not selected / feature
+    // off) falls back to the configured default radius.
+    private Integer radiusMeters;
+
     public BigDecimal getLatitude() {
         return latitude;
     }
@@ -45,5 +54,13 @@ public class LocationRequest {
 
     public void setAccuracy(BigDecimal accuracy) {
         this.accuracy = accuracy;
+    }
+
+    public Integer getRadiusMeters() {
+        return radiusMeters;
+    }
+
+    public void setRadiusMeters(Integer radiusMeters) {
+        this.radiusMeters = radiusMeters;
     }
 }

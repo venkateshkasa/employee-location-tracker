@@ -94,4 +94,16 @@ public class LocationController {
         List<ActivityDto> activities = locationService.getTodayActivities(user.getUserId());
         return ResponseEntity.ok(ApiResponse.success(activities));
     }
+
+    // Heartbeat: called by the employee dashboard every 30 seconds while it
+    // is open, whether Tracking is ON or OFF, so the Admin Dashboard can
+    // reliably detect Offline status (browser closed / connection lost)
+    // via LastSeenTime instead of relying only on IsLoggedIn, which is not
+    // updated when the browser is closed without an explicit logout.
+    @PostMapping("/heartbeat")
+    public ResponseEntity<ApiResponse<Void>> heartbeat() {
+        User user = authService.getCurrentUserEntity();
+        locationService.recordHeartbeat(user.getUserId());
+        return ResponseEntity.ok(ApiResponse.success("Heartbeat recorded", null));
+    }
 }

@@ -53,6 +53,33 @@ public class OfficeGeofenceService {
         return new OfficeResult(nowInside, officeName);
     }
 
+    /**
+     * Straight-line (Haversine) distance in kilometers from the given point
+     * to the nearest configured office. This is intentionally separate from
+     * an employee's "today's travel distance" - it answers "how far is the
+     * employee from the office right now", not "how far have they walked
+     * today". Returns null if no offices are configured.
+     */
+    public Double distanceToNearestOfficeKm(BigDecimal latitude, BigDecimal longitude) {
+        if (latitude == null || longitude == null || offices.isEmpty()) {
+            return null;
+        }
+
+        double nearestMeters = Double.MAX_VALUE;
+        for (OfficeDefinition office : offices) {
+            double meters = HaversineUtil.calculateDistanceMeters(
+                    latitude,
+                    longitude,
+                    BigDecimal.valueOf(office.latitude()),
+                    BigDecimal.valueOf(office.longitude()));
+            if (meters < nearestMeters) {
+                nearestMeters = meters;
+            }
+        }
+
+        return HaversineUtil.metersToKilometers(nearestMeters);
+    }
+
     public Optional<OfficeDefinition> findMatchingOffice(BigDecimal latitude, BigDecimal longitude) {
         return offices.stream()
                 .filter(office -> HaversineUtil.calculateDistanceMeters(

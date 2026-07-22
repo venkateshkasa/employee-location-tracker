@@ -1,6 +1,15 @@
 let currentUser = null;
 let locationInterval = null;
 let trackingEnabled = false;
+let heartbeatInterval = null;
+// While the employee dashboard is open, a heartbeat is sent to the server
+// every 30 seconds (regardless of whether Tracking is ON or OFF) so the
+// Admin Dashboard can tell the difference between "browser closed / lost
+// connection" and "still here" via LastSeenTime, instead of relying only on
+// IsLoggedIn (which beforeunload/pagehide-based approaches can't update
+// reliably - see setupDesktopAutoLogout above, which is a separate,
+// best-effort mechanism kept as-is).
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 let notificationInterval = null;
 let adminNotificationInterval = null;
 let adminDataInterval = null;
@@ -148,7 +157,7 @@ async function initEmployeeDashboard() {
 
         });
 
-    // Tracking OFF
+    // Tracking OFF - stops tracking immediately, no popup.
     document.getElementById('trackingOffBtn')
         .addEventListener('click', () => {
 
@@ -157,6 +166,12 @@ async function initEmployeeDashboard() {
             }
 
         });
+
+    initAddStopModal();
+
+    // Start the Online/Offline heartbeat: keeps LastSeenTime fresh every 30s
+    // while this dashboard is open, whether Tracking is ON or OFF.
+    startHeartbeat();
 
     // ===========================
     // Radius Dropdown
@@ -207,6 +222,17 @@ async function initEmployeeDashboard() {
     initMyReports();
 
     // ===========================
+    // Pending State (before any data loads)
+    // ===========================
+    // Paint the "nothing known yet" state synchronously, before any async
+    // fetch has a chance to resolve. This must happen first: it guarantees
+    // the employee never sees a leftover render (Status/Lat/Lng/Today's
+    // Distance) from whatever was on screen a moment ago - e.g. right after
+    // logging in on a shared browser where a previous employee's dashboard
+    // was just showing. See setLocationPendingUI() below.
+    setLocationPendingUI();
+
+    // ===========================
     // Load Dashboard
     // ===========================
 
@@ -216,7 +242,11 @@ async function initEmployeeDashboard() {
     // location happens to already be stored in the DB - it may belong to a
     // previous login from a completely different city/device - and let the
     // fresh reading populate it instead. Non-location widgets (distance,
-    // stops, activities, route history) still load normally.
+    // stops, activities, route history) still load normally, and - thanks to
+    // the pending state painted above plus the "no-store" fetch/response
+    // caching fix (see api.js and WebConfig) - are now guaranteed to reflect
+    // only the currently authenticated employee's real data, never a
+    // previous employee's cached response.
     await loadEmployeeData({ skipLocationDisplay: true });
 
     // ===========================
@@ -316,8 +346,8 @@ async function initEmployeeDashboard() {
     //     tracking toggle's existing meaning intact - it is NOT written to
     //     the EmployeeLocation table and is NOT visible to admins, since
     //     that still requires tracking to be turned on.
-
-    setLocationPendingUI();
+    // (setLocationPendingUI() already ran at the very start of
+    // initEmployeeDashboard(), before any data was loaded - see above.)
 
     if (trackingEnabled) {
 
@@ -389,11 +419,15 @@ function buildStopHistoryHtml(stops) {
     return stops.map((stop, index) => {
         const mapsUrl = stop.googleMapsUrl || `https://www.google.com/maps?q=${stop.latitude},${stop.longitude}`;
         const address = stop.address || 'Address unavailable';
+        const reasonRow = stop.manual ? `
+                    <div><small class="text-muted">Stop Reason</small><br><strong>${stop.stopReasonLabel || '-'}</strong></div>
+                    <div><small class="text-muted">Remarks</small><br><strong>${stop.remarks || '-'}</strong></div>` : '';
 
         return `
             <div class="stop-history-card">
                 <div class="stop-history-card-header">
                     <span class="stop-history-number">Stop ${index + 1}</span>
+                    ${stop.manual ? '<span class="badge bg-secondary">Manual Stop</span>' : ''}
                 </div>
                 <p class="stop-history-address">📍 ${address}</p>
                 <div class="stop-history-grid">
@@ -401,7 +435,7 @@ function buildStopHistoryHtml(stops) {
                     <div><small class="text-muted">Longitude</small><br><strong>${Number(stop.longitude).toFixed(6)}</strong></div>
                     <div><small class="text-muted">Start Time</small><br><strong>${stop.startTime || '-'}</strong></div>
                     <div><small class="text-muted">End Time</small><br><strong>${stop.endTime || 'Ongoing'}</strong></div>
-                    <div><small class="text-muted">Duration</small><br><strong>${stop.duration || 'Calculating...'}</strong></div>
+                    <div><small class="text-muted">Duration</small><br><strong>${stop.duration || 'Calculating...'}</strong></div>${reasonRow}
                 </div>
                 <a href="${mapsUrl}" target="_blank" rel="noopener" class="stop-history-map-link">
                     <i class="bi bi-geo-alt-fill me-1"></i>Open in Google Maps
@@ -500,6 +534,30 @@ function stopLocationInterval() {
     if (locationInterval) {
         clearInterval(locationInterval);
         locationInterval = null;
+    }
+}
+
+/** Sends one heartbeat immediately, then every 30s while the dashboard is open. */
+function startHeartbeat() {
+    stopHeartbeat();
+    sendHeartbeatBeat();
+    heartbeatInterval = setInterval(sendHeartbeatBeat, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+}
+
+async function sendHeartbeatBeat() {
+    try {
+        await API.sendHeartbeat();
+    } catch (e) {
+        // Best-effort: a failed/offline heartbeat is exactly the case the
+        // server-side timeout is designed to catch, so just let the next
+        // scheduled attempt retry - no need to surface this to the user.
     }
 }
 
@@ -712,6 +770,201 @@ async function toggleTracking(enable) {
 
 }
 
+// ==========================================================
+// Add Stop Popup (opened via the "+ Add Stop" button in the Stop History
+// card header - completely independent of Tracking ON/OFF).
+//
+// The employee picks a Stop Reason, enters a Start Time and an End Time,
+// and optionally Remarks (mandatory only when Reason = "Other"). Saving
+// validates the form, captures the employee's current GPS location
+// automatically, and posts everything to /api/tracking-stop. Tracking
+// ON/OFF state is never touched by this popup.
+// ==========================================================
+
+let addStopModalInstance = null;
+
+function initAddStopModal() {
+    const modalEl = document.getElementById('addStopModal');
+    if (!modalEl) return;
+
+    addStopModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    const addStopBtn = document.getElementById('addStopBtn');
+    if (addStopBtn) {
+        addStopBtn.addEventListener('click', openAddStopModal);
+    }
+
+    const reasonSelect = document.getElementById('addStopReasonSelect');
+    const remarksRequiredMark = document.getElementById('addStopRemarksRequiredMark');
+    const remarksHint = document.getElementById('addStopRemarksHint');
+
+    if (reasonSelect) {
+        reasonSelect.addEventListener('change', () => {
+            const isOther = reasonSelect.value === 'OTHER';
+            if (remarksRequiredMark) remarksRequiredMark.classList.toggle('d-none', !isOther);
+            if (remarksHint) remarksHint.textContent = isOther ? 'Required when reason is Other' : 'Optional';
+            hideAddStopAlert();
+        });
+    }
+
+    const cancelBtn = document.getElementById('addStopCancelBtn');
+    const cancelXBtn = document.getElementById('addStopCancelXBtn');
+    [cancelBtn, cancelXBtn].forEach(btn => {
+        if (btn) {
+            btn.addEventListener('click', () => {
+                addStopModalInstance.hide();
+            });
+        }
+    });
+
+    const saveBtn = document.getElementById('addStopSaveBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', confirmAddStop);
+    }
+}
+
+function showAddStopAlert(message) {
+    const alertBox = document.getElementById('addStopAlert');
+    if (!alertBox) return;
+    alertBox.textContent = message;
+    alertBox.classList.remove('d-none');
+}
+
+function hideAddStopAlert() {
+    const alertBox = document.getElementById('addStopAlert');
+    if (!alertBox) return;
+    alertBox.classList.add('d-none');
+    alertBox.textContent = '';
+}
+
+function openAddStopModal() {
+    if (!addStopModalInstance) return;
+
+    // Reset the form to a clean state every time it opens.
+    const reasonSelect = document.getElementById('addStopReasonSelect');
+    const startInput = document.getElementById('addStopStartTime');
+    const endInput = document.getElementById('addStopEndTime');
+    const remarksInput = document.getElementById('addStopRemarksInput');
+    const remarksRequiredMark = document.getElementById('addStopRemarksRequiredMark');
+    const remarksHint = document.getElementById('addStopRemarksHint');
+    if (reasonSelect) reasonSelect.value = '';
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+    if (remarksInput) remarksInput.value = '';
+    if (remarksRequiredMark) remarksRequiredMark.classList.add('d-none');
+    if (remarksHint) remarksHint.textContent = 'Optional';
+    hideAddStopAlert();
+
+    addStopModalInstance.show();
+}
+
+/**
+ * Returns the employee's current GPS coordinates automatically - reusing
+ * whatever the dashboard already has on hand (lastEmployeeLocation, kept up
+ * to date by updateEmployeeUI()/captureAndSaveLocation()) so the employee
+ * is never prompted to enter a location manually. Falls back to a single
+ * fresh GPS reading only if no location has been captured yet this
+ * session.
+ */
+async function getCurrentLocationForStop() {
+    if (lastEmployeeLocation && Number.isFinite(lastEmployeeLocation.lat) && Number.isFinite(lastEmployeeLocation.lng)) {
+        return { latitude: lastEmployeeLocation.lat, longitude: lastEmployeeLocation.lng };
+    }
+
+    if (!navigator.geolocation) {
+        return null;
+    }
+
+    try {
+        const position = await getFreshGpsPosition();
+        return { latitude: position.coords.latitude, longitude: position.coords.longitude };
+    } catch (error) {
+        console.error('Unable to capture current location for stop:', error);
+        return null;
+    }
+}
+
+async function confirmAddStop() {
+    const reasonSelect = document.getElementById('addStopReasonSelect');
+    const startInput = document.getElementById('addStopStartTime');
+    const endInput = document.getElementById('addStopEndTime');
+    const remarksInput = document.getElementById('addStopRemarksInput');
+    const saveBtn = document.getElementById('addStopSaveBtn');
+
+    const stopReason = reasonSelect ? reasonSelect.value : '';
+    const startTime = startInput ? startInput.value : '';
+    const endTime = endInput ? endInput.value : '';
+    const remarks = remarksInput ? remarksInput.value.trim() : '';
+
+    hideAddStopAlert();
+
+    if (!stopReason) {
+        showAddStopAlert('Please select a Stop Reason.');
+        return;
+    }
+
+    if (!startTime) {
+        showAddStopAlert('Please enter a Start Time.');
+        return;
+    }
+
+    if (!endTime) {
+        showAddStopAlert('Please enter an End Time.');
+        return;
+    }
+
+    if (endTime <= startTime) {
+        showAddStopAlert('End Time must be greater than Start Time.');
+        return;
+    }
+
+    if (stopReason === 'OTHER' && !remarks) {
+        showAddStopAlert('Remarks is required when Stop Reason is Other.');
+        return;
+    }
+
+    const originalHtml = saveBtn ? saveBtn.innerHTML : '';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+    }
+
+    try {
+        const location = await getCurrentLocationForStop();
+        if (!location) {
+            showAddStopAlert('Unable to capture your current location. Please enable location access and try again.');
+            return;
+        }
+
+        const response = await API.addStop({
+            stopReason,
+            remarks: remarks || null,
+            startTime,
+            endTime,
+            latitude: location.latitude,
+            longitude: location.longitude
+        });
+
+        if (response && response.success) {
+            addStopModalInstance.hide();
+
+            // Refresh Stop History / Activity Timeline so the new manual
+            // stop shows up immediately - tracking state is untouched.
+            await loadEmployeeData({ skipLocationDisplay: true });
+        } else {
+            showAddStopAlert((response && response.message) || 'Unable to save the stop. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error adding stop:', error);
+        showAddStopAlert('Unable to save the stop. Please try again.');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalHtml;
+        }
+    }
+}
+
 // How long to wait before automatically retrying when GPS is temporarily
 // unavailable (error.code 2) or a fix times out (error.code 3). Permission
 // denial (error.code 1) is never retried automatically - the user has to
@@ -738,19 +991,31 @@ function getFreshGpsPosition() {
 
 /**
  * Shown while a fresh GPS reading is being obtained (e.g. right after
- * login). Deliberately does NOT display any previously stored coordinates.
+ * login). Deliberately does NOT display any previously stored coordinates,
+ * marker, or distance - all of those are reset to their "nothing known
+ * yet" state here, synchronously, before any data has been fetched for
+ * this session. This runs first, ahead of loadEmployeeData()/
+ * captureAndSaveLocation(), so there is no window in which a leftover
+ * value (e.g. from a previous employee's session on the same browser)
+ * could still be on screen. Today's Distance is then correctly replaced
+ * once loadEmployeeData()/captureAndSaveLocation() resolve with the real,
+ * freshly-fetched value for the now-authenticated employee.
  */
 function setLocationPendingUI() {
     const statusEl = document.getElementById('currentStatus');
     const latEl = document.getElementById('currentLat');
     const lngEl = document.getElementById('currentLng');
     const updatedEl = document.getElementById('lastUpdated');
+    const distanceEl = document.getElementById('todayDistance');
     if (!statusEl || !latEl || !lngEl || !updatedEl) return;
 
     statusEl.innerHTML = '<span class="status-badge status-online">LOCATING...</span>';
     latEl.textContent = '-';
     lngEl.textContent = '-';
     updatedEl.textContent = 'Fetching current location...';
+    if (distanceEl) {
+        distanceEl.textContent = '0.00 km';
+    }
 
     if (MapManager.clearEmployeeMarker) {
         MapManager.clearEmployeeMarker();
@@ -804,10 +1069,14 @@ async function captureAndSaveLocation() {
 
         if (!trackingEnabled) return;
 
+        // Only forward the selected radius while "Show Nearby Colleges" is
+        // actually on - otherwise let the server fall back to its default
+        // radius, same as before this feature existed.
         const response = await API.saveLocation(
             position.coords.latitude,
             position.coords.longitude,
-            position.coords.accuracy
+            position.coords.accuracy,
+            MapManager.showNearbyPlaces ? radiusMeters : undefined
         );
 
         if (response.success) {
@@ -935,13 +1204,25 @@ function renderStopHistory(stops) {
         return;
     }
 
-    container.innerHTML = stops.map(stop => `
+    container.innerHTML = stops.map(stop => {
+        // Use the address already saved on the stop (same value shown in
+        // Admin Reports) - never re-run reverse geocoding here. Only fall
+        // back to lat/lng if no usable address was saved.
+        const hasAddress = stop.address && stop.address.trim() !== '' && stop.address !== 'Address unavailable';
+        const locationLine = hasAddress
+            ? `📍 ${escapeHtml(stop.address)}`
+            : `Location: ${Number(stop.latitude).toFixed(4)}, ${Number(stop.longitude).toFixed(4)}`;
+
+        return `
         <div class="stop-item">
-            <strong>${stop.startTime}</strong> - ${stop.endTime || 'Ongoing'}<br>
+            <strong>${stop.startTime}</strong> - ${stop.endTime || 'Ongoing'}
+            ${stop.manual ? '<span class="badge bg-secondary-subtle text-secondary-emphasis ms-1">Manual</span>' : ''}<br>
+            ${stop.stopReasonLabel ? `<small class="text-muted">Reason: ${escapeHtml(stop.stopReasonLabel)}</small><br>` : ''}
             <small class="text-muted">Duration: ${stop.duration || 'Calculating...'}</small><br>
-            <small class="text-muted">Location: ${Number(stop.latitude).toFixed(4)}, ${Number(stop.longitude).toFixed(4)}</small>
+            <small class="text-muted">${locationLine}</small>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function formatActivityType(type) {
@@ -953,7 +1234,10 @@ function formatActivityType(type) {
         'LOCATION_UPDATE': 'Location Updated',
         'STOP_STARTED': 'Stop Started',
         'STOP_ENDED': 'Stop Ended',
-        'STOP': 'Stop Detected'
+        'STOP': 'Stop Detected',
+        'MANUAL_STOP_STARTED': 'Tracking Stopped (Reason Given)',
+        'MANUAL_STOP_ENDED': 'Tracking Resumed',
+        'MANUAL_STOP_ADDED': 'Stop Added'
     };
     return types[type] || type;
 }
@@ -992,6 +1276,19 @@ async function initAdminDashboard() {
         statusFilter.addEventListener('change', applyEmployeeFilters);
     }
 
+    const departmentFilter = document.getElementById('departmentFilter');
+    if (departmentFilter) {
+        departmentFilter.addEventListener('change', applyEmployeeFilters);
+    }
+
+    const employeeSortSelect = document.getElementById('employeeSortSelect');
+    if (employeeSortSelect) {
+        employeeSortSelect.addEventListener('change', applyEmployeeFilters);
+    }
+
+    initEmployeeManagement();
+    initStopHistoryReport();
+
     await loadAdminData();
     adminDataInterval = setInterval(loadAdminData, ADMIN_LIVE_POLL_MS);
 
@@ -999,6 +1296,99 @@ async function initAdminDashboard() {
     // Polls independently of loadAdminData so new alerts show up quickly.
     await loadAdminNotifications();
     startAdminNotificationPolling();
+}
+
+/**
+ * Sets up the "Stop History Report" card: default date range and the
+ * Search button click handler. The Employee dropdown itself is populated
+ * from allEmployees once loadAdminData() resolves (see
+ * populateStopHistoryEmployeeSelect(), called alongside populateReportSelect()).
+ */
+function initStopHistoryReport() {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const fromInput = document.getElementById('stopHistoryFromDate');
+    const toInput = document.getElementById('stopHistoryToDate');
+    if (fromInput) fromInput.value = todayStr;
+    if (toInput) toInput.value = todayStr;
+
+    const searchBtn = document.getElementById('searchStopHistoryBtn');
+    if (searchBtn) {
+        searchBtn.addEventListener('click', searchStopHistory);
+    }
+}
+
+/** Keeps the Stop History "Employee" filter in sync with the current employee list. */
+function populateStopHistoryEmployeeSelect(employees) {
+    const select = document.getElementById('stopHistoryEmployeeSelect');
+    if (!select) return;
+
+    const current = select.value;
+    select.innerHTML = '<option value="">All Employees</option>' +
+        (employees || []).map(emp =>
+            `<option value="${emp.userId}">${escapeHtml(emp.name)} (${escapeHtml(emp.employeeId)})</option>`
+        ).join('');
+    select.value = current;
+}
+
+async function searchStopHistory() {
+    const userId = document.getElementById('stopHistoryEmployeeSelect')?.value || '';
+    const fromDate = document.getElementById('stopHistoryFromDate')?.value || '';
+    const toDate = document.getElementById('stopHistoryToDate')?.value || '';
+    const stopReason = document.getElementById('stopHistoryReasonFilter')?.value || '';
+    const tbody = document.getElementById('stopHistoryTableBody');
+
+    if (!tbody) return;
+
+    if (fromDate && toDate && fromDate > toDate) {
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-danger">From Date must not be after To Date</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">Loading...</td></tr>';
+
+    try {
+        const response = await API.getStopHistoryReport({
+            userId: userId || undefined,
+            fromDate: fromDate || undefined,
+            toDate: toDate || undefined,
+            stopReason: stopReason || undefined
+        });
+
+        if (response && response.success) {
+            renderStopHistoryReport(response.data);
+        } else {
+            tbody.innerHTML = `<tr><td colspan="11" class="text-center text-danger">${escapeHtml((response && response.message) || 'Failed to load stop history')}</td></tr>`;
+        }
+    } catch (error) {
+        console.error('Error loading stop history report:', error);
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-danger">Failed to load stop history</td></tr>';
+    }
+}
+
+function renderStopHistoryReport(stops) {
+    const tbody = document.getElementById('stopHistoryTableBody');
+    if (!tbody) return;
+
+    if (!stops || stops.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No stop history found for the selected filters</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = stops.map(stop => `
+        <tr>
+            <td>${escapeHtml(stop.employeeName)}</td>
+            <td><small class="text-muted">${escapeHtml(stop.employeeId)}</small></td>
+            <td>${escapeHtml(stop.date)}</td>
+            <td>${escapeHtml(stop.stopReasonLabel || stop.stopReason)}</td>
+            <td>${escapeHtml(stop.remarks) || '-'}</td>
+            <td>${escapeHtml(stop.startTime)}</td>
+            <td>${stop.endTime ? escapeHtml(stop.endTime) : '<span class="status-badge status-online">Ongoing</span>'}</td>
+            <td>${escapeHtml(stop.duration)}</td>
+            <td>${escapeHtml(stop.address)}</td>
+            <td>${Number(stop.latitude).toFixed(6)}</td>
+            <td>${Number(stop.longitude).toFixed(6)}</td>
+        </tr>
+    `).join('');
 }
 
 /**
@@ -1063,6 +1453,8 @@ let allEmployees = [];
 function applyEmployeeFilters() {
     const searchTerm = (document.getElementById('employeeSearchInput')?.value || '').trim().toLowerCase();
     const statusValue = document.getElementById('statusFilter')?.value || '';
+    const departmentValue = document.getElementById('departmentFilter')?.value || '';
+    const sortValue = document.getElementById('employeeSortSelect')?.value || 'name';
 
     const filtered = allEmployees.filter(emp => {
         const matchesSearch = !searchTerm ||
@@ -1070,6 +1462,8 @@ function applyEmployeeFilters() {
             (emp.employeeId && emp.employeeId.toLowerCase().includes(searchTerm));
 
         if (!matchesSearch) return false;
+
+        if (departmentValue && emp.department !== departmentValue) return false;
 
         if (!statusValue) return true;
 
@@ -1083,7 +1477,49 @@ function applyEmployeeFilters() {
         return true;
     });
 
-    renderEmployeeTable(filtered);
+    const sorted = filtered.slice().sort((a, b) => {
+        if (sortValue === 'distance') return (b.todayDistanceKm || 0) - (a.todayDistanceKm || 0);
+        if (sortValue === 'status') return (a.trackingStatus || '').localeCompare(b.trackingStatus || '');
+        if (sortValue === 'lastSeen') return (b.lastUpdated || '').localeCompare(a.lastUpdated || '');
+        return (a.name || '').localeCompare(b.name || '');
+    });
+
+    renderEmployeeTable(sorted);
+}
+
+/**
+ * Keeps the Department filter dropdown and the Add/Edit Employee form's
+ * Department datalist in sync with whatever departments currently exist
+ * among employees, without needing a separate lookup endpoint.
+ */
+function populateDepartmentOptions(employees) {
+    const departments = Array.from(new Set(
+        (employees || []).map(e => e.department).filter(Boolean)
+    )).sort();
+
+    const filterSelect = document.getElementById('departmentFilter');
+    if (filterSelect) {
+        const current = filterSelect.value;
+        filterSelect.innerHTML = '<option value="">All Departments</option>' +
+            departments.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+        filterSelect.value = departments.includes(current) ? current : '';
+    }
+
+    const datalist = document.getElementById('departmentOptions');
+    if (datalist) {
+        datalist.innerHTML = departments.map(d => `<option value="${escapeHtml(d)}">`).join('');
+    }
+}
+
+/** Basic HTML-escaping so employee-entered text can't break table/modal markup. */
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 let adminDataLoadInFlight = false;
@@ -1107,8 +1543,10 @@ async function loadAdminData() {
 
         if (employeesRes && employeesRes.success) {
             allEmployees = employeesRes.data;
+            populateDepartmentOptions(allEmployees);
             applyEmployeeFilters();
             populateReportSelect(employeesRes.data);
+            populateStopHistoryEmployeeSelect(employeesRes.data);
         }
 
         if (liveRes && liveRes.success) {
@@ -1147,51 +1585,533 @@ async function loadAdminData() {
 function renderEmployeeTable(employees) {
     const tbody = document.getElementById('employeeTableBody');
     if (!employees || employees.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No employees found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No employees found</td></tr>';
         return;
     }
 
-    tbody.innerHTML = employees.map(emp => `
+    tbody.innerHTML = employees.map(emp => {
+        const trackingStatus = (emp.trackingStatus || 'OFFLINE').toUpperCase();
+        const isOnline = trackingStatus !== 'OFFLINE';
+        const accountStatus = (emp.accountStatus || 'ACTIVE').toUpperCase();
+        const isActive = accountStatus === 'ACTIVE';
+        const currentLocation = emp.address || emp.officeName || '-';
+
+        return `
         <tr>
-            <td>
-                <strong>${emp.name}</strong><br>
-                <small class="text-muted">${emp.employeeId}</small>
-            </td>
-            <td><span class="status-badge status-${emp.trackingStatus.toLowerCase()}">${emp.trackingStatus}</span></td>
-            <td>${emp.officeName ? emp.officeName : (emp.insideOffice ? 'Inside Office' : '-')}</td>
-            <td>${emp.lastSeen || emp.lastUpdated || '-'}</td>
+            <td><strong>${escapeHtml(emp.name)}</strong></td>
+            <td><small class="text-muted">${escapeHtml(emp.employeeId)}</small></td>
+            <td>${escapeHtml(emp.department) || '-'}</td>
+            <td>${escapeHtml(emp.designation) || '-'}</td>
+            <td><span class="status-badge ${isActive ? 'status-online' : 'status-offline'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+            <td><span class="status-badge ${isOnline ? 'status-online' : 'status-offline'}">${isOnline ? 'ON' : 'OFF'}</span></td>
+            <td>${escapeHtml(emp.officeLocation) || '-'}</td>
+            <td>${escapeHtml(emp.lastSeen || emp.lastUpdated) || '-'}</td>
             <td>${formatDistance(emp.todayDistanceKm)} km</td>
+            <td>${escapeHtml(currentLocation)}</td>
             <td>
-                <button class="btn btn-sm btn-outline-primary view-employee-btn" data-id="${emp.userId}">
-                    <i class="bi bi-eye"></i> View
-                </button>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-sm btn-outline-primary view-employee-btn" data-id="${emp.userId}" title="View">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary edit-employee-btn" data-id="${emp.userId}" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning reset-password-btn" data-id="${emp.userId}" title="Reset Password">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-sm ${isActive ? 'btn-outline-danger' : 'btn-outline-success'} toggle-status-btn" data-id="${emp.userId}" data-status="${accountStatus}" title="${isActive ? 'Deactivate' : 'Activate'}">
+                        <i class="bi ${isActive ? 'bi-toggle-on' : 'bi-toggle-off'}"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger delete-employee-btn" data-id="${emp.userId}" data-name="${escapeHtml(emp.name)}" title="Delete">
+                        <i class="bi bi-trash3"></i>
+                    </button>
+                </div>
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 
     document.querySelectorAll('.view-employee-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const id = btn.dataset.id;
-            try {
-                const response = await API.getEmployee(id);
-                if (response.success) {
-                    const shown = MapManager.focusOnEmployee(response.data);
-                    if (!shown) {
-                        alert(`${response.data.name} has no saved location yet.`);
-                        return;
-                    }
+        btn.addEventListener('click', () => openViewEmployeeModal(btn.dataset.id));
+    });
 
-                    focusedEmployee = response.data;
-                    await refreshAdminGeofenceAndColleges();
-                } else {
-                    alert(response.message || 'Unable to load employee location.');
-                }
-            } catch (error) {
-                console.error('Error loading employee location:', error);
-                alert('Unable to load employee location.');
+    document.querySelectorAll('.edit-employee-btn').forEach(btn => {
+        btn.addEventListener('click', () => openEditEmployeeModal(btn.dataset.id));
+    });
+
+    document.querySelectorAll('.reset-password-btn').forEach(btn => {
+        btn.addEventListener('click', () => openResetPasswordModal(btn.dataset.id));
+    });
+
+    document.querySelectorAll('.toggle-status-btn').forEach(btn => {
+        btn.addEventListener('click', () => toggleEmployeeStatus(btn.dataset.id, btn.dataset.status));
+    });
+
+    document.querySelectorAll('.delete-employee-btn').forEach(btn => {
+        btn.addEventListener('click', () => openDeleteConfirm(btn.dataset.id, btn.dataset.name));
+    });
+}
+
+// ==========================================================
+// Employee Management: Add / Edit / View / Reset Password /
+// Activate-Deactivate / Delete
+// ==========================================================
+
+let pendingPhotoDataUrl = null;
+
+function initEmployeeManagement() {
+    const addBtn = document.getElementById('addEmployeeBtn');
+    const formModalEl = document.getElementById('employeeFormModal');
+
+    if (formModalEl) {
+        formModalEl.addEventListener('show.bs.modal', (event) => {
+            // Only reset into "Add" mode when the modal was opened via the
+            // Add Employee button - openEditEmployeeModal() populates the
+            // form itself and shows the modal programmatically, so it
+            // should be left alone here.
+            if (event.relatedTarget && event.relatedTarget.id === 'addEmployeeBtn') {
+                resetEmployeeForm();
             }
         });
-    });
+    }
+
+    const form = document.getElementById('employeeForm');
+    if (form) {
+        form.addEventListener('submit', submitEmployeeForm);
+    }
+
+    const photoInput = document.getElementById('empPhotoFile');
+    if (photoInput) {
+        photoInput.addEventListener('change', handlePhotoFileChange);
+    }
+
+    const resetPasswordForm = document.getElementById('resetPasswordForm');
+    if (resetPasswordForm) {
+        resetPasswordForm.addEventListener('submit', submitResetPassword);
+    }
+
+    const deleteConfirmBtn = document.getElementById('deleteConfirmBtn');
+    if (deleteConfirmBtn) {
+        deleteConfirmBtn.addEventListener('click', confirmDeleteEmployee);
+    }
+
+    const showOnMapBtn = document.getElementById('viewEmpShowOnMapBtn');
+    if (showOnMapBtn) {
+        showOnMapBtn.addEventListener('click', showViewedEmployeeOnMap);
+    }
+}
+
+function resetEmployeeForm() {
+    const form = document.getElementById('employeeForm');
+    if (form) form.reset();
+
+    pendingPhotoDataUrl = null;
+    document.getElementById('empUserId').value = '';
+    document.getElementById('empEmployeeId').value = '';
+    document.getElementById('empEmployeeId').placeholder = 'Auto-generated';
+    document.getElementById('empPhotoPreview').classList.add('d-none');
+    document.getElementById('empPhotoPreview').src = '';
+    document.getElementById('empAccountStatus').value = 'ACTIVE';
+
+    document.getElementById('empPasswordGroup').classList.remove('d-none');
+    document.getElementById('empConfirmPasswordGroup').classList.remove('d-none');
+    document.getElementById('empPassword').setAttribute('required', 'required');
+    document.getElementById('empConfirmPassword').setAttribute('required', 'required');
+    document.getElementById('empUsername').removeAttribute('disabled');
+
+    document.getElementById('employeeFormModalLabel').innerHTML =
+        '<i class="bi bi-person-plus-fill text-primary me-2"></i>Add Employee';
+    document.getElementById('employeeFormSubmitBtn').innerHTML =
+        '<i class="bi bi-check-circle me-1"></i>Create Employee';
+
+    hideFormAlert();
+}
+
+function handlePhotoFileChange(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        pendingPhotoDataUrl = reader.result;
+        const preview = document.getElementById('empPhotoPreview');
+        preview.src = pendingPhotoDataUrl;
+        preview.classList.remove('d-none');
+    };
+    reader.readAsDataURL(file);
+}
+
+function showFormAlert(message) {
+    const alertBox = document.getElementById('employeeFormAlert');
+    alertBox.textContent = message;
+    alertBox.classList.remove('d-none');
+}
+
+function hideFormAlert() {
+    const alertBox = document.getElementById('employeeFormAlert');
+    alertBox.classList.add('d-none');
+    alertBox.textContent = '';
+}
+
+/**
+ * Client-side mandatory-field + uniqueness pre-check for the Add/Edit
+ * Employee form. The server re-validates everything regardless (source of
+ * truth for uniqueness), this just gives immediate feedback.
+ */
+function validateEmployeeForm(isEdit) {
+    const requiredFields = [
+        ['empFullName', 'Full Name'],
+        ['empEmail', 'Email'],
+        ['empMobile', 'Mobile Number'],
+        ['empDepartment', 'Department'],
+        ['empDesignation', 'Designation'],
+        ['empJoiningDate', 'Joining Date'],
+        ['empOfficeLocation', 'Office Location'],
+        ['empUsername', 'Username']
+    ];
+
+    for (const [id, label] of requiredFields) {
+        const value = document.getElementById(id).value.trim();
+        if (!value) {
+            return `${label} is required`;
+        }
+    }
+
+    if (!isEdit) {
+        const password = document.getElementById('empPassword').value;
+        const confirmPassword = document.getElementById('empConfirmPassword').value;
+        if (!password) return 'Password is required';
+        if (!confirmPassword) return 'Confirm Password is required';
+        if (password !== confirmPassword) return 'Password and Confirm Password must match';
+    }
+
+    const userId = document.getElementById('empUserId').value;
+    const email = document.getElementById('empEmail').value.trim().toLowerCase();
+    const mobile = document.getElementById('empMobile').value.trim();
+    const username = document.getElementById('empUsername').value.trim().toLowerCase();
+
+    const conflict = allEmployees.find(emp => String(emp.userId) !== String(userId) && (
+        (emp.email && emp.email.toLowerCase() === email) ||
+        (emp.phone && emp.phone === mobile) ||
+        (emp.username && emp.username.toLowerCase() === username)
+    ));
+
+    if (conflict) {
+        if (conflict.email && conflict.email.toLowerCase() === email) return 'Email must be unique - this email is already in use';
+        if (conflict.phone && conflict.phone === mobile) return 'Mobile Number must be unique - this number is already in use';
+        return 'Username must be unique - this username is already in use';
+    }
+
+    return null;
+}
+
+function buildEmployeePayload() {
+    return {
+        name: document.getElementById('empFullName').value.trim(),
+        email: document.getElementById('empEmail').value.trim(),
+        mobile: document.getElementById('empMobile').value.trim(),
+        gender: document.getElementById('empGender').value,
+        dateOfBirth: document.getElementById('empDob').value,
+        address: document.getElementById('empAddress').value.trim(),
+        photoUrl: pendingPhotoDataUrl,
+        department: document.getElementById('empDepartment').value.trim(),
+        designation: document.getElementById('empDesignation').value.trim(),
+        reportingManager: document.getElementById('empReportingManager').value.trim(),
+        joiningDate: document.getElementById('empJoiningDate').value,
+        employeeType: document.getElementById('empType').value,
+        officeLocation: document.getElementById('empOfficeLocation').value.trim(),
+        shift: document.getElementById('empShift').value,
+        username: document.getElementById('empUsername').value.trim(),
+        accountStatus: document.getElementById('empAccountStatus').value
+    };
+}
+
+async function submitEmployeeForm(event) {
+    event.preventDefault();
+    hideFormAlert();
+
+    const userId = document.getElementById('empUserId').value;
+    const isEdit = Boolean(userId);
+
+    const validationError = validateEmployeeForm(isEdit);
+    if (validationError) {
+        showFormAlert(validationError);
+        return;
+    }
+
+    const payload = buildEmployeePayload();
+
+    const submitBtn = document.getElementById('employeeFormSubmitBtn');
+    const originalHtml = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+    try {
+        let response;
+        if (isEdit) {
+            response = await API.updateEmployee(userId, payload);
+        } else {
+            payload.password = document.getElementById('empPassword').value;
+            payload.confirmPassword = document.getElementById('empConfirmPassword').value;
+            response = await API.createEmployee(payload);
+        }
+
+        if (response && response.success) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('employeeFormModal')).hide();
+            showToast(isEdit ? 'Employee updated successfully' : 'Employee created successfully', 'success');
+            resetEmployeeForm();
+            await loadAdminData();
+        } else {
+            showFormAlert((response && response.message) || 'Unable to save employee');
+        }
+    } catch (error) {
+        console.error('Error saving employee:', error);
+        showFormAlert('Unable to save employee. Please try again.');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalHtml;
+    }
+}
+
+function openEditEmployeeModal(userId) {
+    const emp = allEmployees.find(e => String(e.userId) === String(userId));
+    if (!emp) return;
+
+    resetEmployeeForm();
+
+    document.getElementById('empUserId').value = emp.userId;
+    document.getElementById('empEmployeeId').value = emp.employeeId || '';
+    document.getElementById('empEmployeeId').placeholder = '';
+    document.getElementById('empFullName').value = emp.name || '';
+    document.getElementById('empEmail').value = emp.email || '';
+    document.getElementById('empMobile').value = emp.phone || '';
+    document.getElementById('empGender').value = emp.gender || '';
+    document.getElementById('empDob').value = emp.dateOfBirth || '';
+    document.getElementById('empAddress').value = emp.residentialAddress || '';
+    document.getElementById('empDepartment').value = emp.department || '';
+    document.getElementById('empDesignation').value = emp.designation || '';
+    document.getElementById('empReportingManager').value = emp.manager || '';
+    document.getElementById('empJoiningDate').value = emp.joiningDate || '';
+    document.getElementById('empType').value = emp.employeeType || 'Full Time';
+    document.getElementById('empOfficeLocation').value = emp.officeLocation || '';
+    document.getElementById('empShift').value = emp.shift || 'General Shift';
+    document.getElementById('empUsername').value = emp.username || '';
+    document.getElementById('empAccountStatus').value = emp.accountStatus || 'ACTIVE';
+
+    if (emp.photoUrl) {
+        pendingPhotoDataUrl = emp.photoUrl;
+        const preview = document.getElementById('empPhotoPreview');
+        preview.src = emp.photoUrl;
+        preview.classList.remove('d-none');
+    }
+
+    // Password is changed via the dedicated Reset Password action, not here.
+    document.getElementById('empPasswordGroup').classList.add('d-none');
+    document.getElementById('empConfirmPasswordGroup').classList.add('d-none');
+    document.getElementById('empPassword').removeAttribute('required');
+    document.getElementById('empConfirmPassword').removeAttribute('required');
+
+    document.getElementById('employeeFormModalLabel').innerHTML =
+        '<i class="bi bi-pencil-square text-primary me-2"></i>Edit Employee';
+    document.getElementById('employeeFormSubmitBtn').innerHTML =
+        '<i class="bi bi-check-circle me-1"></i>Update Employee';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('employeeFormModal')).show();
+}
+
+function openResetPasswordModal(userId) {
+    const emp = allEmployees.find(e => String(e.userId) === String(userId));
+
+    document.getElementById('resetPasswordForm').reset();
+    document.getElementById('resetPasswordAlert').classList.add('d-none');
+    document.getElementById('resetPasswordUserId').value = userId;
+    document.getElementById('resetPasswordEmpLabel').textContent = emp
+        ? `Set a new password for ${emp.name} (${emp.employeeId}).`
+        : 'Set a new password for this employee.';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('resetPasswordModal')).show();
+}
+
+async function submitResetPassword(event) {
+    event.preventDefault();
+
+    const userId = document.getElementById('resetPasswordUserId').value;
+    const newPassword = document.getElementById('resetNewPassword').value;
+    const confirmPassword = document.getElementById('resetConfirmPassword').value;
+    const alertBox = document.getElementById('resetPasswordAlert');
+    alertBox.classList.add('d-none');
+
+    if (!newPassword || !confirmPassword) {
+        alertBox.textContent = 'Both password fields are required';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        alertBox.textContent = 'Password and Confirm Password must match';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    try {
+        const response = await API.resetEmployeePassword(userId, { newPassword, confirmPassword });
+        if (response && response.success) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('resetPasswordModal')).hide();
+            showToast('Password reset successfully', 'success');
+        } else {
+            alertBox.textContent = (response && response.message) || 'Unable to reset password';
+            alertBox.classList.remove('d-none');
+        }
+    } catch (error) {
+        console.error('Error resetting password:', error);
+        alertBox.textContent = 'Unable to reset password. Please try again.';
+        alertBox.classList.remove('d-none');
+    }
+}
+
+async function toggleEmployeeStatus(userId, currentStatus) {
+    const activating = currentStatus === 'INACTIVE';
+    const emp = allEmployees.find(e => String(e.userId) === String(userId));
+    const label = emp ? emp.name : 'this employee';
+
+    const confirmed = window.confirm(`${activating ? 'Activate' : 'Deactivate'} ${label}?`);
+    if (!confirmed) return;
+
+    try {
+        const response = await API.updateEmployeeStatus(userId, activating ? 'ACTIVE' : 'INACTIVE');
+        if (response && response.success) {
+            showToast(`Employee ${activating ? 'activated' : 'deactivated'} successfully`, 'success');
+            await loadAdminData();
+        } else {
+            showToast((response && response.message) || 'Unable to update employee status', 'danger');
+        }
+    } catch (error) {
+        console.error('Error updating employee status:', error);
+        showToast('Unable to update employee status', 'danger');
+    }
+}
+
+function openDeleteConfirm(userId, name) {
+    document.getElementById('deleteConfirmEmpName').textContent = name || 'this employee';
+    document.getElementById('deleteConfirmBtn').dataset.id = userId;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteConfirmModal')).show();
+}
+
+async function confirmDeleteEmployee() {
+    const btn = document.getElementById('deleteConfirmBtn');
+    const userId = btn.dataset.id;
+    if (!userId) return;
+
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting...';
+
+    try {
+        const response = await API.deleteEmployee(userId);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteConfirmModal')).hide();
+        if (response && response.success) {
+            showToast('Employee deleted successfully', 'success');
+            await loadAdminData();
+        } else {
+            showToast((response && response.message) || 'Unable to delete employee', 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting employee:', error);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteConfirmModal')).hide();
+        showToast('Unable to delete employee', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+let viewedEmployee = null;
+
+async function openViewEmployeeModal(userId) {
+    try {
+        const response = await API.getEmployee(userId);
+        if (!response || !response.success) {
+            showToast((response && response.message) || 'Unable to load employee details', 'danger');
+            return;
+        }
+
+        const emp = response.data;
+        viewedEmployee = emp;
+
+        document.getElementById('viewEmpName').textContent = emp.name || '-';
+        document.getElementById('viewEmpId').textContent = emp.employeeId || '-';
+        document.getElementById('viewEmpDepartment').textContent = emp.department || '-';
+        document.getElementById('viewEmpDesignation').textContent = emp.designation || '-';
+        document.getElementById('viewEmpEmail').textContent = emp.email || '-';
+        document.getElementById('viewEmpMobile').textContent = emp.phone || '-';
+        document.getElementById('viewEmpOfficeLocation').textContent = emp.officeLocation || '-';
+
+        const trackingStatus = (emp.trackingStatus || 'OFFLINE').toUpperCase();
+        document.getElementById('viewEmpTrackingStatus').innerHTML =
+            `<span class="status-badge ${trackingStatus !== 'OFFLINE' ? 'status-online' : 'status-offline'}">${trackingStatus}</span>`;
+
+        document.getElementById('viewEmpCurrentLocation').textContent = emp.address || emp.officeName || '-';
+        document.getElementById('viewEmpDistance').textContent = `${formatDistance(emp.todayDistanceKm)} km`;
+        document.getElementById('viewEmpLastSeen').textContent = emp.lastSeen || emp.lastUpdated || '-';
+        document.getElementById('viewEmpJoiningDate').textContent = emp.joiningDate || '-';
+        document.getElementById('viewEmpManager').textContent = emp.manager || '-';
+
+        const photo = document.getElementById('viewEmpPhoto');
+        const fallback = document.getElementById('viewEmpPhotoFallback');
+        if (emp.photoUrl) {
+            photo.src = emp.photoUrl;
+            photo.classList.remove('d-none');
+            fallback.classList.add('d-none');
+        } else {
+            photo.classList.add('d-none');
+            fallback.classList.remove('d-none');
+        }
+
+        const showOnMapBtn = document.getElementById('viewEmpShowOnMapBtn');
+        const hasLocation = Number.isFinite(Number(emp.latitude)) && Number.isFinite(Number(emp.longitude));
+        showOnMapBtn.disabled = !hasLocation;
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('viewEmployeeModal')).show();
+    } catch (error) {
+        console.error('Error loading employee details:', error);
+        showToast('Unable to load employee details', 'danger');
+    }
+}
+
+async function showViewedEmployeeOnMap() {
+    if (!viewedEmployee) return;
+
+    const shown = MapManager.focusOnEmployee(viewedEmployee);
+    if (!shown) {
+        showToast(`${viewedEmployee.name} has no saved location yet.`, 'danger');
+        return;
+    }
+
+    focusedEmployee = viewedEmployee;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('viewEmployeeModal')).hide();
+    await refreshAdminGeofenceAndColleges();
+}
+
+/** Lightweight Bootstrap toast, styled to match the existing theme's alert colors. */
+function showToast(message, type = 'success') {
+    const container = document.getElementById('appToastContainer');
+    if (!container) return;
+
+    const bg = type === 'success' ? 'text-bg-success' : (type === 'danger' ? 'text-bg-danger' : 'text-bg-secondary');
+    const icon = type === 'success' ? 'bi-check-circle-fill' : (type === 'danger' ? 'bi-exclamation-triangle-fill' : 'bi-info-circle-fill');
+
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast align-items-center ${bg} border-0`;
+    toastEl.setAttribute('role', 'alert');
+    toastEl.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body"><i class="bi ${icon} me-2"></i>${escapeHtml(message)}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>`;
+
+    container.appendChild(toastEl);
+    const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    toast.show();
 }
 
 /**
@@ -1232,9 +2152,20 @@ async function refreshAdminGeofenceAndColleges() {
 
 function populateReportSelect(employees) {
     const select = document.getElementById('reportEmployeeSelect');
+    // loadAdminData() re-runs this every ADMIN_LIVE_POLL_MS to refresh the
+    // live employee list. Rebuilding innerHTML resets a <select>'s selection
+    // to its first option, so without saving/restoring the current value the
+    // admin's chosen employee would get silently reverted to the first
+    // employee in the list within ~1.5s of picking it - causing "Generate
+    // Report" to always report on that first employee regardless of what was
+    // selected. Same guard already used by populateStopHistoryEmployeeSelect.
+    const current = select.value;
     select.innerHTML = employees.map(emp =>
         `<option value="${emp.userId}">${emp.name} (${emp.employeeId})</option>`
     ).join('');
+    if (current && select.querySelector(`option[value="${current}"]`)) {
+        select.value = current;
+    }
 }
 
 async function generateReport() {
@@ -1382,6 +2313,9 @@ async function handleLogout() {
 
     // Stop location updates
     stopLocationInterval();
+
+    // Stop the Online/Offline heartbeat
+    stopHeartbeat();
 
     // Stop notification polling
     stopNotificationPolling();

@@ -20,7 +20,16 @@ const API = {
         const response = await fetch(this.baseUrl + url, {
             ...options,
             headers,
-            credentials: 'include'
+            credentials: 'include',
+            // Every API response is scoped to whichever user is authenticated
+            // for the current session (see AuthService#getCurrentUserEntity on
+            // the backend). 'no-store' guarantees the browser never serves a
+            // previously cached response for the same URL - otherwise, after
+            // Employee A logs out and Employee B logs in on the same browser,
+            // a request like GET /api/location/distance could be answered
+            // straight from the browser's HTTP cache with Employee A's data
+            // instead of actually being sent to the server for Employee B.
+            cache: 'no-store'
         });
 
         // /api/auth/me is used to check whether a session already exists, and
@@ -80,12 +89,25 @@ const API = {
         return this.post('/api/auth/forgot-password', { email });
     },
 
-    async saveLocation(latitude, longitude, accuracy) {
-        return this.post('/api/location/save', { latitude, longitude, accuracy });
+    async saveLocation(latitude, longitude, accuracy, radiusMeters) {
+        return this.post('/api/location/save', { latitude, longitude, accuracy, radiusMeters });
     },
 
     async setTracking(enabled) {
         return this.post('/api/location/tracking', { enabled });
+    },
+
+    async addStop({ stopReason, remarks, startTime, endTime, latitude, longitude }) {
+        return this.post('/api/tracking-stop', { stopReason, remarks, startTime, endTime, latitude, longitude });
+    },
+
+    async getStopHistoryReport({ userId, fromDate, toDate, stopReason } = {}) {
+        const params = new URLSearchParams();
+        if (userId) params.append('userId', userId);
+        if (fromDate) params.append('fromDate', fromDate);
+        if (toDate) params.append('toDate', toDate);
+        if (stopReason) params.append('stopReason', stopReason);
+        return this.get('/api/admin/stop-history?' + params.toString());
     },
 
     async getCurrentLocation() {
@@ -107,6 +129,10 @@ const API = {
 
     async getTodayActivities() {
         return this.get('/api/location/activities');
+    },
+
+    async sendHeartbeat() {
+        return this.post('/api/location/heartbeat', {});
     },
 
     async getMyReport(fromDate, toDate) {
@@ -140,6 +166,37 @@ const API = {
 
     async getEmployee(id) {
         return this.get(`/api/admin/employee/${id}`);
+    },
+
+    async createEmployee(payload) {
+        return this.post('/api/admin/employees', payload);
+    },
+
+    async updateEmployee(id, payload) {
+        return this.request(`/api/admin/employees/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+    },
+
+    async resetEmployeePassword(id, payload) {
+        return this.request(`/api/admin/employees/${id}/reset-password`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+    },
+
+    async updateEmployeeStatus(id, status) {
+        return this.request(`/api/admin/employees/${id}/status`, {
+            method: 'PUT',
+            body: JSON.stringify({ status })
+        });
+    },
+
+    async deleteEmployee(id) {
+        return this.request(`/api/admin/employees/${id}`, {
+            method: 'DELETE'
+        });
     },
 
     async getLiveLocations() {

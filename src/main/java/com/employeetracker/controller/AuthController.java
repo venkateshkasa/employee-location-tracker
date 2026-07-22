@@ -5,6 +5,7 @@ import com.employeetracker.dto.ForgotPasswordRequest;
 import com.employeetracker.dto.LoginRequest;
 import com.employeetracker.dto.LoginResponse;
 import com.employeetracker.dto.PasswordChangeRequest;
+import com.employeetracker.dto.SetupPasswordRequest;
 import com.employeetracker.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -57,5 +59,27 @@ public class AuthController {
                 "Email is not configured. Placeholder reset token generated for admin/testing use.",
                 token
         ));
+    }
+
+    /**
+     * Used by the Password Setup page on load to decide whether to render
+     * the New Password / Confirm Password form or the "Invalid or Expired
+     * Link" state, without consuming the token.
+     */
+    @GetMapping("/validate-setup-token")
+    public ResponseEntity<ApiResponse<Boolean>> validateSetupToken(@RequestParam String token) {
+        boolean valid = authService.isSetupTokenValid(token);
+        return ResponseEntity.ok(ApiResponse.success(valid));
+    }
+
+    /**
+     * Completes account activation from the welcome-email link: sets the
+     * employee's chosen password (stored via BCrypt) and invalidates the
+     * setup token.
+     */
+    @PostMapping("/setup-password")
+    public ResponseEntity<ApiResponse<Void>> setupPassword(@Valid @RequestBody SetupPasswordRequest request) {
+        authService.setupPassword(request.getToken(), request.getNewPassword(), request.getConfirmPassword());
+        return ResponseEntity.ok(ApiResponse.success("Password created successfully", null));
     }
 }

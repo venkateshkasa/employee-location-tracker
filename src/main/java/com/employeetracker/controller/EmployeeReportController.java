@@ -45,7 +45,7 @@ public class EmployeeReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
 
         User user = authService.getCurrentUserEntity();
-
+ 
         if (fromDate == null) {
             fromDate = LocalDate.now();
         }

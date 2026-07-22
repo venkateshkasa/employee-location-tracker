@@ -240,7 +240,7 @@ public class ReportService {
 
     private void createStopsSheet(Sheet sheet, ReportDto report, CellStyle headerStyle) {
         Row header = sheet.createRow(0);
-        String[] columns = {"Stop ID", "Latitude", "Longitude", "Address", "Start Time", "End Time", "Duration", "Google Maps Link"};
+        String[] columns = {"Stop ID", "Latitude", "Longitude", "Address", "Start Time", "End Time", "Duration", "Stop Reason", "Remarks", "Google Maps Link"};
         for (int i = 0; i < columns.length; i++) {
             Cell cell = header.createCell(i);
             cell.setCellValue(columns[i]);
@@ -257,7 +257,9 @@ public class ReportService {
             row.createCell(4).setCellValue(stop.getStartTime());
             row.createCell(5).setCellValue(stop.getEndTime() != null ? stop.getEndTime() : "Ongoing");
             row.createCell(6).setCellValue(stop.getDuration() != null ? stop.getDuration() : "");
-            row.createCell(7).setCellValue(stop.getGoogleMapsUrl() != null ? stop.getGoogleMapsUrl() : "");
+            row.createCell(7).setCellValue(stop.getStopReasonLabel() != null ? stop.getStopReasonLabel() : "-");
+            row.createCell(8).setCellValue(stop.getRemarks() != null ? stop.getRemarks() : "");
+            row.createCell(9).setCellValue(stop.getGoogleMapsUrl() != null ? stop.getGoogleMapsUrl() : "");
         }
 
         for (int i = 0; i < columns.length; i++) {

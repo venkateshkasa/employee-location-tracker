@@ -87,6 +87,10 @@ public class AuthService {
             user.setLoggedIn(true);
             user.setTrackingEnabled(true);
             user.setLastLoginTime(LocalDateTime.now());
+            // Seed LastSeenTime at login so the heartbeat-based Online/Offline
+            // check (see LocationService#determineTrackingStatus) has a fresh
+            // value immediately, before the dashboard's first 30s heartbeat.
+            user.setLastSeenTime(LocalDateTime.now());
             userRepository.save(user);
         }
 
@@ -184,6 +188,64 @@ public class AuthService {
         activityService.logActivity(user.getUserId(), ActivityType.PASSWORD_RESET_REQUESTED,
                 "Password reset requested. Email service is not configured; reset token generated.", null, null, null);
         return token;
+    }
+
+    /**
+     * Checks whether an account-activation ("Create Password") token is
+     * still valid (exists and not expired), without consuming it. Used by
+     * the Password Setup page on load to decide whether to show the form
+     * or the "Invalid or Expired Link" state.
+     */
+    @Transactional(readOnly = true)
+    public boolean isSetupTokenValid(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        return userRepository.findByPasswordSetupToken(token)
+                .filter(user -> user.getPasswordSetupTokenExpiry() != null
+                        && user.getPasswordSetupTokenExpiry().isAfter(LocalDateTime.now()))
+                .isPresent();
+    }
+
+    /**
+     * Completes account activation: validates the token (exists, not
+     * expired), sets the new BCrypt-hashed password, and invalidates the
+     * token so it cannot be reused.
+     */
+    @Transactional
+    public void setupPassword(String token, String newPassword, String confirmPassword) {
+        if (token == null || token.isBlank()) {
+            throw new BadRequestException("Invalid or expired link");
+        }
+
+        User user = userRepository.findByPasswordSetupToken(token)
+                .orElseThrow(() -> new BadRequestException("Invalid or expired link"));
+
+        if (user.getPasswordSetupTokenExpiry() == null
+                || user.getPasswordSetupTokenExpiry().isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("Invalid or expired link");
+        }
+
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters long");
+        }
+        if (!newPassword.equals(confirmPassword)) {
+            throw new BadRequestException("New Password and Confirm Password do not match");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        // Invalidate the token immediately so the link can never be reused,
+        // even if the request is somehow replayed.
+        user.setPasswordSetupToken(null);
+        user.setPasswordSetupTokenExpiry(null);
+        userRepository.save(user);
+
+        try {
+            activityService.logActivity(user.getUserId(), ActivityType.PASSWORD_CHANGED,
+                    "Password set via account activation link", null, null, null);
+        } catch (Exception ex) {
+            log.warn("Failed to record password-setup activity for user {}", user.getUserId(), ex);
+        }
     }
 
     private User getUserEntity(Authentication authentication) {

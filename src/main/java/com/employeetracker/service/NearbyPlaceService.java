@@ -48,6 +48,9 @@ private final NotificationService notificationService;
         private BigDecimal longitude;
         private LocalDateTime searchTime;
         private List<PlaceSearchService.NearbyPlaceResult> results;
+        // Radius (meters) this cached search was performed with - see
+        // processLocationUpdate(userId, lat, lng, radiusMeters).
+        private int radiusMeters;
     }
 
    public NearbyPlaceService(
@@ -73,25 +76,57 @@ private final NotificationService notificationService;
      */
     @Transactional
     public List<NearbyPlaceDto> processLocationUpdate(Long userId, BigDecimal latitude, BigDecimal longitude) {
+        return processLocationUpdate(userId, latitude, longitude, null);
+    }
+
+    /**
+     * Same background nearby-college detection as above, but scoped to an
+     * explicit radius (in meters) - normally the radius currently selected
+     * on the employee's Radius dropdown (1/3/5/10 KM), forwarded from
+     * LocationRequest#getRadiusMeters(). This is what keeps the
+     * "notify only within the selected radius" behavior in sync with the
+     * radius used for the map/circle/nearby search, instead of always
+     * detecting against the server's hardcoded default radius regardless
+     * of what the employee selected.
+     * <p>
+     * Results are also restricted to Colleges/Universities, matching the
+     * "Show Nearby Colleges" feature (and its notification copy, which
+     * always refers to "University") - schools are intentionally excluded
+     * here, the same as the live radius-aware search used for the map.
+     *
+     * @param radiusMeters explicit radius to use, or {@code null} to fall
+     *                      back to the configured default radius
+     */
+    @Transactional
+    public List<NearbyPlaceDto> processLocationUpdate(Long userId, BigDecimal latitude, BigDecimal longitude,
+                                                       Integer radiusMeters) {
         if (!properties.isEnabled()) {
             logger.debug("Nearby place search is disabled");
             return List.of();
         }
 
-        // Check if we can use cached results (per-user)
+        int effectiveRadius = (radiusMeters != null && radiusMeters > 0) ? radiusMeters : properties.getRadius();
+
+        // Check if we can use cached results (per-user). The cache is only
+        // reused when the previously cached search also used the same
+        // radius - otherwise a stale search made at a smaller/larger radius
+        // could wrongly answer for a different radius selection.
         LocationCache cache = caches.get(userId);
-        if (shouldUseCachedResults(cache, latitude, longitude)) {
+        if (shouldUseCachedResults(cache, latitude, longitude) && cache.radiusMeters == effectiveRadius) {
             logger.debug("Using cached nearby place results for user {}", userId);
-            return processCachedResults(userId, cache, latitude, longitude);
+            return processCachedResults(userId, cache, latitude, longitude, effectiveRadius);
         }
 
-        // Perform new search
-        logger.info("Searching for nearby places for user {} at {}, {}", userId, latitude, longitude);
-        List<PlaceSearchService.NearbyPlaceResult> searchResults = 
-            placeSearchService.searchNearbyPlaces(latitude, longitude);
+        // Perform new search, scoped to the effective radius.
+        logger.info("Searching for nearby places for user {} at {}, {} within {}m", userId, latitude, longitude, effectiveRadius);
+        List<PlaceSearchService.NearbyPlaceResult> searchResults =
+            placeSearchService.searchNearbyPlaces(latitude, longitude, effectiveRadius).stream()
+                .filter(result -> isCollegeOrUniversity(result.getPlaceType()))
+                .filter(result -> result.getDistance() != null && result.getDistance().doubleValue() <= effectiveRadius)
+                .collect(Collectors.toList());
 
         // Update cache for this user only
-        updateCache(userId, latitude, longitude, searchResults);
+        updateCache(userId, latitude, longitude, searchResults, effectiveRadius);
 
         // Process results
         return processSearchResults(userId, searchResults);
@@ -116,11 +151,17 @@ private final NotificationService notificationService;
      */
     private void updateCache(Long userId, BigDecimal latitude, BigDecimal longitude,
                              List<PlaceSearchService.NearbyPlaceResult> results) {
+        updateCache(userId, latitude, longitude, results, properties.getRadius());
+    }
+
+    private void updateCache(Long userId, BigDecimal latitude, BigDecimal longitude,
+                             List<PlaceSearchService.NearbyPlaceResult> results, int radiusMeters) {
         LocationCache cache = new LocationCache();
         cache.latitude = latitude;
         cache.longitude = longitude;
         cache.searchTime = LocalDateTime.now();
         cache.results = new ArrayList<>(results);
+        cache.radiusMeters = radiusMeters;
         caches.put(userId, cache);
     }
 
@@ -129,6 +170,12 @@ private final NotificationService notificationService;
      */
     private List<NearbyPlaceDto> processCachedResults(Long userId, LocationCache cache,
                                                         BigDecimal latitude, BigDecimal longitude) {
+        return processCachedResults(userId, cache, latitude, longitude, cache.radiusMeters);
+    }
+
+    private List<NearbyPlaceDto> processCachedResults(Long userId, LocationCache cache,
+                                                        BigDecimal latitude, BigDecimal longitude,
+                                                        int radiusMeters) {
         // Recalculate distances based on current location
         List<PlaceSearchService.NearbyPlaceResult> updatedResults = new ArrayList<>();
         for (PlaceSearchService.NearbyPlaceResult result : cache.results) {
@@ -146,7 +193,15 @@ double newDistance = HaversineUtil.calculateDistanceMeters(
             updatedResults.add(updated);
         }
 
-        return processSearchResults(userId, updatedResults);
+        // Re-apply the radius cutoff, since the employee may have moved
+        // within the cache-distance window and a place that was within
+        // range at the cached location could now have drifted just outside
+        // the selected radius (or vice versa).
+        List<PlaceSearchService.NearbyPlaceResult> withinRadius = updatedResults.stream()
+                .filter(result -> result.getDistance() != null && result.getDistance().doubleValue() <= radiusMeters)
+                .collect(Collectors.toList());
+
+        return processSearchResults(userId, withinRadius);
     }
 
     /**
@@ -369,10 +424,12 @@ double distance = HaversineUtil.calculateDistanceMeters(
     }
 
     /**
-     * Restricts live "nearby colleges" results to colleges/universities, as
-     * required by the Radius dropdown feature (schools are excluded here,
-     * though they remain part of the separate background detection/
-     * notification flow in {@link #processLocationUpdate}).
+     * Restricts "nearby colleges" results to colleges/universities, as
+     * required by the Radius dropdown feature (schools are excluded here).
+     * Used by both the live radius-aware search and the background
+     * detection/notification flow in {@link #processLocationUpdate}, so
+     * map, notifications, and admin notifications always agree on what
+     * counts as "nearby".
      */
     private boolean isCollegeOrUniversity(String placeType) {
         if (placeType == null) {

@@ -28,7 +28,8 @@ public class SecurityConfig {
                         .ignoringRequestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/logout",
-                                "/api/auth/forgot-password"
+                                "/api/auth/forgot-password",
+                                "/api/auth/setup-password"
                         ))
 
                 .sessionManagement(session -> session
@@ -42,13 +43,18 @@ public class SecurityConfig {
                                 "/js/**",
                                 "/images/**",
                                 "/icons/**",
+                                "/uploads/**",
                                 "/manifest.json",
                                 "/service-worker.js",
-                                "/favicon.ico"
+                                "/favicon.ico",
+                                "/setup-password",
+                                "/setup-password.html"
                         ).permitAll()
 
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/forgot-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/setup-password").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/validate-setup-token").permitAll()
 
                         // The dashboard must never be reachable without a valid, authenticated session.
                         .requestMatchers("/dashboard", "/dashboard.html").authenticated()

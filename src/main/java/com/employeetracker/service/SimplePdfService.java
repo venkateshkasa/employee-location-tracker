@@ -47,6 +47,10 @@ public class SimplePdfService {
             lines.add("Start: " + valueOrDash(stop.getStartTime())
                     + " | End: " + valueOrDash(stop.getEndTime())
                     + " | Duration: " + valueOrDash(stop.getDuration()));
+            if (stop.isManual()) {
+                lines.add("Stop Reason: " + valueOrDash(stop.getStopReasonLabel())
+                        + " | Remarks: " + valueOrDash(stop.getRemarks()));
+            }
             lines.add("Google Maps: " + valueOrDash(stop.getGoogleMapsUrl()));
         }
         return createPdf(lines);

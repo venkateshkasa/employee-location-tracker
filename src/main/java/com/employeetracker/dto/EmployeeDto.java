@@ -11,6 +11,7 @@ public class EmployeeDto {
     private double todayDistanceKm;
     private double weeklyDistanceKm;
     private double monthlyDistanceKm;
+    private Double distanceFromOfficeKm;
     private String lastUpdated;
     private String lastSeen;
     private String photoUrl;
@@ -25,6 +26,89 @@ public class EmployeeDto {
     private String movementType;
     private Double latitude;
     private Double longitude;
+
+    // ---- Added for the Employee Management enhancements ----
+    private String gender;
+    private String dateOfBirth;
+    private String residentialAddress;
+    private String joiningDate;
+    private String employeeType;
+    private String officeLocation;
+    private String shift;
+    private String username;
+    private String accountStatus;
+
+    public String getGender() {
+        return gender;
+    }
+
+    public void setGender(String gender) {
+        this.gender = gender;
+    }
+
+    public String getDateOfBirth() {
+        return dateOfBirth;
+    }
+
+    public void setDateOfBirth(String dateOfBirth) {
+        this.dateOfBirth = dateOfBirth;
+    }
+
+    public String getResidentialAddress() {
+        return residentialAddress;
+    }
+
+    public void setResidentialAddress(String residentialAddress) {
+        this.residentialAddress = residentialAddress;
+    }
+
+    public String getJoiningDate() {
+        return joiningDate;
+    }
+
+    public void setJoiningDate(String joiningDate) {
+        this.joiningDate = joiningDate;
+    }
+
+    public String getEmployeeType() {
+        return employeeType;
+    }
+
+    public void setEmployeeType(String employeeType) {
+        this.employeeType = employeeType;
+    }
+
+    public String getOfficeLocation() {
+        return officeLocation;
+    }
+
+    public void setOfficeLocation(String officeLocation) {
+        this.officeLocation = officeLocation;
+    }
+
+    public String getShift() {
+        return shift;
+    }
+
+    public void setShift(String shift) {
+        this.shift = shift;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getAccountStatus() {
+        return accountStatus;
+    }
+
+    public void setAccountStatus(String accountStatus) {
+        this.accountStatus = accountStatus;
+    }
 
     public Long getUserId() {
         return userId;
@@ -96,6 +180,14 @@ public class EmployeeDto {
 
     public void setMonthlyDistanceKm(double monthlyDistanceKm) {
         this.monthlyDistanceKm = monthlyDistanceKm;
+    }
+
+    public Double getDistanceFromOfficeKm() {
+        return distanceFromOfficeKm;
+    }
+
+    public void setDistanceFromOfficeKm(Double distanceFromOfficeKm) {
+        this.distanceFromOfficeKm = distanceFromOfficeKm;
     }
 
     public String getLastUpdated() {

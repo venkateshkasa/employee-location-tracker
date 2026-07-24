@@ -19,4 +19,12 @@ public interface EmployeeActivityRepository extends JpaRepository<EmployeeActivi
                                                @Param("end") LocalDateTime end);
 
     List<EmployeeActivity> findTop20ByActivityTypeInOrderByActivityTimeDesc(List<com.employeetracker.entity.ActivityType> activityTypes);
+
+    // Used by DistanceCalculationService to find "tracking session start"
+    // boundaries (LOGIN / TRACKING_ENABLED) so that distance is never summed
+    // across a login or a Tracking OFF -> ON transition - see
+    // DistanceCalculationService#calculateDistanceKm for details.
+    List<EmployeeActivity> findByUserIdAndActivityTypeInAndActivityTimeBetweenOrderByActivityTimeAsc(
+            Long userId, List<com.employeetracker.entity.ActivityType> activityTypes,
+            LocalDateTime start, LocalDateTime end);
 }

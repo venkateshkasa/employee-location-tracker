@@ -85,6 +85,17 @@ const API = {
         return this.post('/api/auth/change-password', { currentPassword, newPassword });
     },
 
+    async getMyProfile() {
+        return this.get('/api/auth/profile');
+    },
+
+    async updateMyProfile(payload) {
+        return this.request('/api/auth/profile', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+    },
+
     async forgotPassword(email) {
         return this.post('/api/auth/forgot-password', { email });
     },

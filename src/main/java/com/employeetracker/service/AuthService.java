@@ -3,7 +3,9 @@ package com.employeetracker.service;
 import com.employeetracker.config.CustomUserDetailsService;
 import com.employeetracker.dto.LoginRequest;
 import com.employeetracker.dto.LoginResponse;
+import com.employeetracker.dto.MyProfileDto;
 import com.employeetracker.dto.PasswordChangeRequest;
+import com.employeetracker.dto.UpdateMyProfileRequest;
 import com.employeetracker.entity.ActivityType;
 import com.employeetracker.entity.User;
 import com.employeetracker.entity.UserRole;
@@ -39,19 +41,22 @@ public class AuthService {
     private final UserRepository userRepository;
     private final StopDetectionService stopDetectionService;
     private final PasswordEncoder passwordEncoder;
+    private final FileStorageService fileStorageService;
 
     public AuthService(AuthenticationManager authenticationManager,
                        CustomUserDetailsService userDetailsService,
                        ActivityService activityService,
                        UserRepository userRepository,
                        StopDetectionService stopDetectionService,
-                       PasswordEncoder passwordEncoder) {
+                       PasswordEncoder passwordEncoder,
+                       FileStorageService fileStorageService) {
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.activityService = activityService;
         this.userRepository = userRepository;
         this.stopDetectionService = stopDetectionService;
         this.passwordEncoder = passwordEncoder;
+        this.fileStorageService = fileStorageService;
     }
 
     @Transactional
@@ -176,6 +181,56 @@ public class AuthService {
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
         activityService.logActivity(user.getUserId(), ActivityType.PASSWORD_CHANGED, "Password changed", null, null, null);
+    }
+
+    /**
+     * Read-only "My Profile" view for the currently logged-in user (works
+     * for both EMPLOYEE and ADMIN roles, since both are Users).
+     */
+    @Transactional(readOnly = true)
+    public MyProfileDto getMyProfile() {
+        return mapToMyProfileDto(getCurrentUserEntity());
+    }
+
+    /**
+     * Self-service "Edit Profile": the employee/admin may only change their
+     * own Profile Photo, Mobile Number and Address. Employee ID, Department,
+     * Designation, Role, Joining Date and Username are never touched here.
+     */
+    @Transactional
+    public MyProfileDto updateMyProfile(UpdateMyProfileRequest request) {
+        User user = getCurrentUserEntity();
+
+        user.setPhone(request.getMobile());
+        user.setResidentialAddress(request.getAddress());
+        user.setPhotoUrl(fileStorageService.resolvePhotoUrl(request.getPhotoUrl()));
+
+        userRepository.save(user);
+
+        try {
+            activityService.logActivity(user.getUserId(), ActivityType.PROFILE_UPDATED, "Profile updated", null, null, null);
+        } catch (Exception ex) {
+            log.warn("Failed to record profile-update activity for user {}", user.getUserId(), ex);
+        }
+
+        return mapToMyProfileDto(user);
+    }
+
+    private MyProfileDto mapToMyProfileDto(User user) {
+        MyProfileDto dto = new MyProfileDto();
+        dto.setUserId(user.getUserId());
+        dto.setEmployeeId(user.getEmployeeId());
+        dto.setName(user.getName());
+        dto.setEmail(user.getEmail());
+        dto.setPhone(user.getPhone());
+        dto.setDepartment(user.getDepartment());
+        dto.setDesignation(user.getDesignation());
+        dto.setJoiningDate(user.getJoiningDate() != null ? user.getJoiningDate().toString() : null);
+        dto.setOfficeLocation(user.getHomeOfficeLocation());
+        dto.setAddress(user.getResidentialAddress());
+        dto.setPhotoUrl(user.getPhotoUrl());
+        dto.setRole(user.getRole() != null ? user.getRole().name() : null);
+        return dto;
     }
 
     @Transactional

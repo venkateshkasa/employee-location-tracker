@@ -148,6 +148,47 @@ a { color: var(--primary-color); }
     transform: translateY(-1px);
 }
 
+/* ==========================================================
+   PROFILE AVATAR + DROPDOWN (header)
+   ========================================================== */
+.profile-menu-btn {
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.4rem;
+    padding-right: 0.6rem;
+}
+
+.nav-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    flex-shrink: 0;
+}
+
+.nav-avatar-fallback {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    font-size: 18px;
+    flex-shrink: 0;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+}
+
+.nav-avatar-fallback.d-none { display: none !important; }
+
+.nav-user-role {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.65);
+    line-height: 1;
+}
+
 /* Brand icon badge */
 .brand-mark {
     display: inline-flex;
@@ -1107,40 +1148,114 @@ body.dark-mode .map-legend {
 
 body.dark-mode .legend-item { color: #cfd3ec; }
 
-body.dark-mode .table { color: #eef0f9; }
+/* Bootstrap 5.3 tables (incl. .table-light thead, .table-hover, .table-sm
+   used across the Employee List, Stop History and Reports tables) drive
+   their cell colors/backgrounds through per-table CSS custom properties
+   (--bs-table-color, --bs-table-bg, --bs-table-striped-*, --bs-table-hover-*)
+   applied directly on every <th>/<td>. Those variables still resolve to
+   Bootstrap's light-theme values in Dark Mode because this app toggles a
+   plain `.dark-mode` class rather than Bootstrap's own [data-bs-theme]
+   attribute, which is what was leaving header text, row text and the
+   thead background unreadable. !important here guarantees our values win
+   regardless of which table variant classes (.table-light/.table-hover/
+   .table-sm/.table-striped) are combined on a given table. */
+body.dark-mode .table {
+    --bs-table-color: #eef0f9;
+    --bs-table-bg: transparent;
+    --bs-table-border-color: rgba(255,255,255,0.1);
+    --bs-table-striped-color: #eef0f9;
+    --bs-table-striped-bg: rgba(255,255,255,0.03);
+    --bs-table-active-color: #eef0f9;
+    --bs-table-active-bg: rgba(129, 140, 248, 0.16);
+    --bs-table-hover-color: #eef0f9;
+    --bs-table-hover-bg: rgba(99, 102, 241, 0.14);
+    color: #eef0f9 !important;
+    border-color: rgba(255,255,255,0.1) !important;
+}
 
+body.dark-mode .table > :not(caption) > * > * {
+    color: #eef0f9 !important;
+    background-color: transparent !important;
+    border-bottom-color: rgba(255,255,255,0.1) !important;
+}
+
+body.dark-mode .table thead th,
 body.dark-mode .table th {
-    color: #b8bdd6;
-    background: rgba(255,255,255,0.03);
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    color: #b8bdd6 !important;
+    background-color: rgba(255,255,255,0.05) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.12) !important;
 }
 
 body.dark-mode .table td {
-    color: #eef0f9;
-    border-color: rgba(255,255,255,0.07);
+    color: #eef0f9 !important;
+    border-color: rgba(255,255,255,0.07) !important;
 }
 
-body.dark-mode .table tbody tr:hover { background: rgba(99, 102, 241, 0.14); }
+body.dark-mode .table tbody tr:hover,
+body.dark-mode .table tbody tr:hover > * {
+    background-color: rgba(99, 102, 241, 0.16) !important;
+    color: #ffffff !important;
+}
 
-body.dark-mode .table-light { background: rgba(255,255,255,0.04) !important; }
+body.dark-mode .table-light,
+body.dark-mode .table-light > * {
+    color: #b8bdd6 !important;
+    background-color: rgba(255,255,255,0.05) !important;
+}
+
+body.dark-mode .table-responsive::-webkit-scrollbar { height: 8px; width: 8px; }
+body.dark-mode .table-responsive::-webkit-scrollbar-track { background: transparent; }
+body.dark-mode .table-responsive::-webkit-scrollbar-thumb {
+    background-color: rgba(129, 140, 248, 0.4);
+    border-radius: 999px;
+}
+body.dark-mode .table-responsive { scrollbar-color: rgba(129, 140, 248, 0.4) transparent; }
 
 body.dark-mode .form-control,
 body.dark-mode .form-select {
-    background: rgba(255,255,255,0.05);
-    color: #eef0f9;
-    border: 1px solid rgba(255,255,255,0.12);
+    background-color: rgba(255,255,255,0.05) !important;
+    color: #eef0f9 !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
 }
 
 body.dark-mode .form-control:focus,
 body.dark-mode .form-select:focus {
-    background: rgba(255,255,255,0.08);
-    border-color: var(--primary-light);
+    background-color: rgba(255,255,255,0.08) !important;
+    border-color: var(--primary-light) !important;
     box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.22);
+    color: #eef0f9 !important;
 }
 
-body.dark-mode .form-control::placeholder { color: #8a8fb0; }
+body.dark-mode .form-control::placeholder { color: #8a8fb0 !important; opacity: 1; }
 
-body.dark-mode .form-label { color: #cfd3ec; }
+body.dark-mode .form-control:disabled,
+body.dark-mode .form-control[readonly] {
+    background-color: rgba(255,255,255,0.03) !important;
+    color: #9aa0c3 !important;
+}
+
+body.dark-mode .form-label { color: #cfd3ec !important; }
+
+/* Bootstrap's .form-select background-image is a fixed dark-gray inline
+   SVG arrow (#343a40) - on our dark input background it was effectively
+   invisible, which is a big part of why the "Status"/"Department"/"Sort"
+   filters and every dropdown in the Add Employee form read as unreadable.
+   Re-drawn here in a light color that matches the rest of the Dark Mode
+   palette. */
+body.dark-mode .form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23cfd3ec' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.75rem center !important;
+    background-size: 16px 12px !important;
+}
+
+/* Native date/time picker icon (Chromium/WebKit) defaults to a black
+   glyph, invisible against a dark input - invert it in Dark Mode so the
+   From/To Date fields in Reports and Stop History filters stay usable. */
+body.dark-mode input[type="date"]::-webkit-calendar-picker-indicator,
+body.dark-mode input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.85);
+}
 
 body.dark-mode .input-group-text {
     background: rgba(255,255,255,0.05);
@@ -1187,14 +1302,72 @@ body.dark-mode .stop-item:hover {
 body.dark-mode .report-summary {
     background: linear-gradient(150deg, rgba(99,102,241,0.12), rgba(6,182,212,0.08));
     border-color: rgba(255,255,255,0.08);
+    color: #eef0f9;
 }
+
+body.dark-mode .report-summary strong { color: #f5f6fc; }
 
 body.dark-mode .stop-history-card {
     background: rgba(255,255,255,0.05);
     border-color: rgba(255,255,255,0.1);
+    color: #eef0f9;
 }
 
+body.dark-mode .stop-history-card strong { color: #f5f6fc; }
+
 body.dark-mode .stop-history-address { color: #f5f6fc; }
+
+/* Status/account badges (Employee List "Status"/"Tracking Status" columns,
+   "Manual Stop" tags) already use solid, self-contained gradient
+   backgrounds with dark text so they read the same in both themes; the
+   plain Bootstrap `.badge`/`bg-secondary-subtle` variants used alongside
+   them, however, don't automatically adapt without Bootstrap's own
+   [data-bs-theme] mechanism, so pin their contrast explicitly here. */
+body.dark-mode .status-badge {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+body.dark-mode .badge.bg-secondary-subtle {
+    background-color: rgba(255,255,255,0.1) !important;
+    color: #d8dbf0 !important;
+}
+
+body.dark-mode .badge.bg-secondary {
+    background-color: #4b5063 !important;
+    color: #f5f6fc !important;
+}
+
+/* Pagination (used by any list/table that paginates) */
+body.dark-mode .page-link {
+    background-color: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.12);
+    color: #eef0f9;
+}
+
+body.dark-mode .page-link:hover {
+    background-color: rgba(129, 140, 248, 0.16);
+    color: #ffffff;
+}
+
+body.dark-mode .page-item.active .page-link {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    color: #ffffff;
+}
+
+body.dark-mode .page-item.disabled .page-link {
+    background-color: rgba(255,255,255,0.03);
+    color: #6b7094;
+}
+
+/* Statistic cards (Admin overview + card icon chips) */
+body.dark-mode .stat-card .text-muted,
+body.dark-mode .admin-stat .text-muted { color: #9aa0c3 !important; }
+
+body.dark-mode .stat-icon,
+body.dark-mode .stat-icon-lg {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
 
 body.dark-mode .leaflet-control { filter: brightness(0.85) invert(0.92) hue-rotate(180deg); }
 
@@ -1211,14 +1384,38 @@ body.dark-mode .text-muted { color: #9aa0c3 !important; }
 body.dark-mode ::selection { background: rgba(129, 140, 248, 0.3); }
 
 /* ---- Add / Edit Employee modal: keep header & footer fixed, only the
-   body scrolls, capped at 90vh so it always fits laptop/desktop viewports. ---- */
+   modal body scrolls, capped so it always fits the viewport.
+   FIX (scroll behaviour): the previous version capped everything with
+   `vh` units. `vh` is locked to the browser's *largest* possible viewport,
+   so on mobile - where the address bar / toolbar shrinks the *visible*
+   viewport - the modal was sized taller than what was actually on screen,
+   leaving the lower fields and the footer buttons unreachable no matter
+   how you scrolled. It also didn't stop wheel/trackpad "scroll chaining":
+   once the body content hit its top/bottom edge, further wheel input fell
+   through to the page behind the modal, which read as "scrolling doesn't
+   work". Finally, nothing forced a scrollbar to render, so on platforms
+   with auto-hiding overlay scrollbars there was no visible affordance
+   that the body was scrollable at all. Fixed below with `dvh` (falls back
+   to `vh` where unsupported), `overscroll-behavior: contain`, and an
+   explicit always-visible scrollbar. Layout/fields/buttons are unchanged -
+   only scroll mechanics. ---- */
 .employee-form-dialog {
     max-height: 90vh;
+    max-height: 90dvh;
+    /* Bootstrap's .modal-dialog-centered sets align-items:center, which
+       centers .modal-content at its natural (content) height instead of
+       stretching it to fill the dialog. max-height still caps the result,
+       but forcing stretch here removes any ambiguity so the body's
+       overflow/scroll is always what kicks in, in every browser. */
+    align-items: stretch;
 }
 
 .employee-form-dialog .modal-content {
     max-height: 90vh;
+    max-height: 90dvh;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .employee-form-dialog .modal-header,
@@ -1226,7 +1423,96 @@ body.dark-mode ::selection { background: rgba(129, 140, 248, 0.3); }
     flex-shrink: 0;
 }
 
+/* Only the body scrolls. overscroll-behavior:contain keeps the mouse
+   wheel/trackpad/touch scroll "trapped" inside the modal body once it
+   reaches its top or bottom edge, instead of chaining through to the page
+   behind (which must stay fixed per the requirements). scrollbar-gutter
+   reserves space for the bar so it never overlaps the form fields, and
+   the scrollbar-color / -webkit-scrollbar rules force a visible,
+   always-on scrollbar on desktop across Firefox and Chromium/WebKit
+   browsers rather than relying on an OS overlay scrollbar that can be
+   invisible until actively dragged. */
 .employee-form-dialog .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
-    max-height: calc(90vh - 130px);
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(79, 70, 229, 0.45) transparent;
+}
+
+.employee-form-dialog .modal-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.employee-form-dialog .modal-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.employee-form-dialog .modal-body::-webkit-scrollbar-thumb {
+    background-color: rgba(79, 70, 229, 0.45);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.employee-form-dialog .modal-body::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(79, 70, 229, 0.7);
+}
+
+body.dark-mode .employee-form-dialog .modal-body {
+    scrollbar-color: rgba(129, 140, 248, 0.5) transparent;
+}
+
+body.dark-mode .employee-form-dialog .modal-body::-webkit-scrollbar-thumb {
+    background-color: rgba(129, 140, 248, 0.5);
+}
+
+@media (max-width: 768px) {
+    /* Use as much of the small viewport as possible, and make sure the
+       footer's three buttons (Create Employee, Reset, Cancel) always stay
+       on-screen and readable instead of wrapping/shrinking unpredictably.
+       dvh here is what actually fixes "entire form cannot be accessed" on
+       mobile: it tracks the real visible viewport as the address bar
+       shows/hides, instead of the old fixed vh figure that could size the
+       modal past the bottom of the screen. */
+    .employee-form-dialog {
+        max-height: calc(100vh - 1rem);
+        max-height: calc(100dvh - 1rem);
+        margin: 0.5rem;
+    }
+
+    .employee-form-dialog .modal-content {
+        max-height: calc(100vh - 1rem);
+        max-height: calc(100dvh - 1rem);
+    }
+
+    .employee-form-dialog .modal-body {
+        /* Touch scrolling only needs to move vertically; this stops
+           accidental horizontal swipes on inputs from being interpreted
+           as a gesture to dismiss/drag the sheet. */
+        touch-action: pan-y;
+    }
+
+    .employee-form-dialog .modal-footer {
+        flex-wrap: nowrap;
+        gap: 0.4rem;
+        padding: 0.75rem;
+        position: sticky;
+        bottom: 0;
+        background: inherit;
+        z-index: 2;
+    }
+
+    .employee-form-dialog .modal-footer .btn {
+        flex: 1 1 0;
+        white-space: nowrap;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+        font-size: 0.78rem;
+    }
 }

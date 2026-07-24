@@ -46,7 +46,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.location.href = '/index.html';
     }
 
-    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        handleLogout();
+    });
+
+    document.getElementById('myProfileMenuItem').addEventListener('click', (e) => {
+        e.preventDefault();
+        openMyProfileModal();
+    });
+    document.getElementById('editProfileMenuItem').addEventListener('click', (e) => {
+        e.preventDefault();
+        openEditProfileModal();
+    });
+    document.getElementById('myProfileEditBtn').addEventListener('click', () => {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('myProfileModal')).hide();
+        openEditProfileModal();
+    });
+    document.getElementById('changePasswordMenuItem').addEventListener('click', (e) => {
+        e.preventDefault();
+        openChangePasswordModal();
+    });
+    document.getElementById('editProfileForm').addEventListener('submit', handleEditProfileSubmit);
+    document.getElementById('editProfilePhotoFile').addEventListener('change', handleEditProfilePhotoChange);
+    document.getElementById('changePasswordForm').addEventListener('submit', handleChangePasswordSubmit);
+
     initDarkMode();
 
 document
@@ -125,7 +149,7 @@ function setupDesktopAutoLogout() {
 }
 
 async function initializeDashboard() {
-    document.getElementById('navUserInfo').textContent = `${currentUser.name} (${currentUser.role})`;
+    renderNavProfile();
 
     if (currentUser.role === 'EMPLOYEE') {
         document.getElementById('employeeSection').classList.remove('d-none');
@@ -136,6 +160,239 @@ async function initializeDashboard() {
     if (currentUser.role === 'ADMIN') {
         document.getElementById('adminSection').classList.remove('d-none');
         await initAdminDashboard();
+    }
+}
+
+/**
+ * Renders the header's profile avatar + name/role from currentUser, and
+ * falls back to a generic person icon when no profile photo is set.
+ */
+function renderNavProfile() {
+    const avatar = document.getElementById('navUserAvatar');
+    const fallback = document.getElementById('navUserAvatarFallback');
+    const nameEl = document.getElementById('navUserName');
+    const roleEl = document.getElementById('navUserRole');
+
+    nameEl.textContent = currentUser.name || '-';
+    roleEl.textContent = currentUser.role === 'ADMIN' ? 'Admin' : 'Employee';
+
+    if (currentUser.photoUrl) {
+        avatar.src = currentUser.photoUrl;
+        avatar.classList.remove('d-none');
+        fallback.classList.add('d-none');
+    } else {
+        avatar.classList.add('d-none');
+        fallback.classList.remove('d-none');
+    }
+}
+
+/** Opens the read-only "My Profile" modal, populated from /api/auth/profile. */
+async function openMyProfileModal() {
+    try {
+        const response = await API.getMyProfile();
+        if (!response || !response.success) {
+            showToast((response && response.message) || 'Unable to load your profile', 'danger');
+            return;
+        }
+
+        const profile = response.data;
+
+        document.getElementById('myProfileName').textContent = profile.name || '-';
+        document.getElementById('myProfileEmployeeId').textContent = profile.employeeId || '-';
+        document.getElementById('myProfileEmail').textContent = profile.email || '-';
+        document.getElementById('myProfileMobile').textContent = profile.phone || '-';
+        document.getElementById('myProfileDepartment').textContent = profile.department || '-';
+        document.getElementById('myProfileDesignation').textContent = profile.designation || '-';
+        document.getElementById('myProfileJoiningDate').textContent = profile.joiningDate || '-';
+        document.getElementById('myProfileOfficeLocation').textContent = profile.officeLocation || '-';
+        document.getElementById('myProfileAddress').textContent = profile.address || '-';
+
+        const photo = document.getElementById('myProfilePhoto');
+        const fallback = document.getElementById('myProfilePhotoFallback');
+        if (profile.photoUrl) {
+            photo.src = profile.photoUrl;
+            photo.classList.remove('d-none');
+            fallback.classList.add('d-none');
+        } else {
+            photo.classList.add('d-none');
+            fallback.classList.remove('d-none');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('myProfileModal')).show();
+    } catch (error) {
+        console.error('Error loading profile:', error);
+        showToast('Unable to load your profile', 'danger');
+    }
+}
+
+let editProfilePhotoData = undefined; // undefined = untouched, null = removed, string = new/base64 or existing url
+
+/** Opens "Edit Profile" pre-filled with the current Mobile Number, Address and Photo. */
+async function openEditProfileModal() {
+    const alertBox = document.getElementById('editProfileAlert');
+    alertBox.classList.add('d-none');
+    document.getElementById('editProfileForm').reset();
+    document.getElementById('editProfilePhotoFile').value = '';
+    editProfilePhotoData = undefined;
+
+    try {
+        const response = await API.getMyProfile();
+        if (!response || !response.success) {
+            showToast((response && response.message) || 'Unable to load your profile', 'danger');
+            return;
+        }
+
+        const profile = response.data;
+        document.getElementById('editProfileMobile').value = profile.phone || '';
+        document.getElementById('editProfileAddress').value = profile.address || '';
+        // Seed with the existing photo path (not just "untouched") so that
+        // saving without picking a new photo keeps the current one instead
+        // of wiping it - see handleEditProfileSubmit.
+        editProfilePhotoData = profile.photoUrl || null;
+
+        const preview = document.getElementById('editProfilePhotoPreview');
+        const fallback = document.getElementById('editProfilePhotoFallback');
+        if (profile.photoUrl) {
+            preview.src = profile.photoUrl;
+            preview.classList.remove('d-none');
+            fallback.classList.add('d-none');
+        } else {
+            preview.classList.add('d-none');
+            fallback.classList.remove('d-none');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('editProfileModal')).show();
+    } catch (error) {
+        console.error('Error loading profile for edit:', error);
+        showToast('Unable to load your profile', 'danger');
+    }
+}
+
+/** Reads the newly selected photo file into a base64 data URL for preview + submit. */
+function handleEditProfilePhotoChange(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        editProfilePhotoData = reader.result;
+        const preview = document.getElementById('editProfilePhotoPreview');
+        const fallback = document.getElementById('editProfilePhotoFallback');
+        preview.src = editProfilePhotoData;
+        preview.classList.remove('d-none');
+        fallback.classList.add('d-none');
+    };
+    reader.readAsDataURL(file);
+}
+
+async function handleEditProfileSubmit(event) {
+    event.preventDefault();
+
+    const alertBox = document.getElementById('editProfileAlert');
+    alertBox.classList.add('d-none');
+
+    const mobile = document.getElementById('editProfileMobile').value.trim();
+    const address = document.getElementById('editProfileAddress').value.trim();
+
+    if (!mobile) {
+        alertBox.textContent = 'Mobile Number is required';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    const btn = document.getElementById('editProfileSaveBtn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+    try {
+        // editProfilePhotoData is seeded with the existing photo path when
+        // the modal opens (see openEditProfileModal) and only changes if a
+        // new file is picked, so it's always safe to send as-is: unchanged
+        // paths pass through untouched and new uploads get saved - see
+        // FileStorageService#resolvePhotoUrl.
+        const payload = { mobile, address, photoUrl: editProfilePhotoData };
+
+        const response = await API.updateMyProfile(payload);
+        if (!response || !response.success) {
+            alertBox.textContent = (response && response.message) || 'Unable to update profile';
+            alertBox.classList.remove('d-none');
+            return;
+        }
+
+        currentUser.photoUrl = response.data.photoUrl;
+        currentUser.phone = response.data.phone;
+        renderNavProfile();
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('editProfileModal')).hide();
+        showToast('Profile updated successfully', 'success');
+    } catch (error) {
+        console.error('Error updating profile:', error);
+        alertBox.textContent = 'Unable to update profile. Please try again.';
+        alertBox.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+/** Opens the Change Password dialog with a clean form. */
+function openChangePasswordModal() {
+    document.getElementById('changePasswordForm').reset();
+    document.getElementById('changePasswordAlert').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('changePasswordModal')).show();
+}
+
+async function handleChangePasswordSubmit(event) {
+    event.preventDefault();
+
+    const alertBox = document.getElementById('changePasswordAlert');
+    alertBox.classList.add('d-none');
+
+    const currentPassword = document.getElementById('currentPasswordInput').value;
+    const newPassword = document.getElementById('newPasswordInput').value;
+    const confirmPassword = document.getElementById('confirmNewPasswordInput').value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        alertBox.textContent = 'All fields are required';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        alertBox.textContent = 'New Password and Confirm Password do not match';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    if (newPassword.length < 8) {
+        alertBox.textContent = 'New password must be at least 8 characters long';
+        alertBox.classList.remove('d-none');
+        return;
+    }
+
+    const btn = document.getElementById('changePasswordSaveBtn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Changing...';
+
+    try {
+        const response = await API.changePassword(currentPassword, newPassword);
+        if (!response || !response.success) {
+            alertBox.textContent = (response && response.message) || 'Current password is incorrect';
+            alertBox.classList.remove('d-none');
+            return;
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('changePasswordModal')).hide();
+        showToast('Password changed successfully', 'success');
+    } catch (error) {
+        console.error('Error changing password:', error);
+        alertBox.textContent = 'Unable to change password. Please try again.';
+        alertBox.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
     }
 }
 
@@ -1631,7 +1888,7 @@ function renderEmployeeTable(employees) {
     }).join('');
 
     document.querySelectorAll('.view-employee-btn').forEach(btn => {
-        btn.addEventListener('click', () => openViewEmployeeModal(btn.dataset.id));
+        btn.addEventListener('click', () => handleViewEmployeeClick(btn.dataset.id));
     });
 
     document.querySelectorAll('.edit-employee-btn').forEach(btn => {
@@ -2024,6 +2281,59 @@ async function confirmDeleteEmployee() {
     }
 }
 
+/**
+ * Admin "View" action for an employee row.
+ * - Online (tracking status not OFFLINE and a saved location exists):
+ *   jump straight to the Live Map, center on the employee, open their
+ *   marker popup, highlight the marker, and zoom in - no intermediate
+ *   dialog.
+ * - Offline: never navigate to the map; show an "Employee Offline" popup
+ *   instead.
+ */
+async function handleViewEmployeeClick(userId) {
+    try {
+        const response = await API.getEmployee(userId);
+        if (!response || !response.success) {
+            showToast((response && response.message) || 'Unable to load employee details', 'danger');
+            return;
+        }
+
+        const emp = response.data;
+        const trackingStatus = (emp.trackingStatus || 'OFFLINE').toUpperCase();
+        const hasLocation = Number.isFinite(Number(emp.latitude)) && Number.isFinite(Number(emp.longitude));
+        const isOnline = trackingStatus !== 'OFFLINE' && hasLocation;
+
+        if (!isOnline) {
+            showEmployeeOfflineModal();
+            return;
+        }
+
+        viewedEmployee = emp;
+        focusedEmployee = emp;
+
+        const shown = MapManager.focusOnEmployee(emp);
+        if (!shown) {
+            showEmployeeOfflineModal();
+            return;
+        }
+
+        await refreshAdminGeofenceAndColleges();
+
+        const mapCard = document.getElementById('adminMap');
+        if (mapCard && typeof mapCard.scrollIntoView === 'function') {
+            mapCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    } catch (error) {
+        console.error('Error viewing employee on map:', error);
+        showToast('Unable to load employee details', 'danger');
+    }
+}
+
+/** "Employee Offline" popup shown when View is clicked for an offline employee. */
+function showEmployeeOfflineModal() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('employeeOfflineModal')).show();
+}
+
 let viewedEmployee = null;
 
 async function openViewEmployeeModal(userId) {
@@ -2214,9 +2524,24 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
  * time. Handles the case where there is only a single location point (still
  * draws a single-point chart at 0 km instead of leaving the canvas empty).
  */
+let lastDistanceChartReport = null;
+
+/** Returns Chart.js colors appropriate for the current Light/Dark Mode. */
+function getChartThemeColors() {
+    const isDark = document.body.classList.contains('dark-mode');
+    return {
+        textColor: isDark ? '#cfd3ec' : '#334155',
+        gridColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.08)',
+        lineColor: isDark ? '#818cf8' : '#0d6efd',
+        fillColor: isDark ? 'rgba(129, 140, 248, 0.22)' : 'rgba(13, 110, 253, 0.15)'
+    };
+}
+
 function renderDistanceChart(report) {
     const canvas = document.getElementById('distanceChart');
     if (!canvas || typeof Chart === 'undefined') return;
+
+    lastDistanceChartReport = report;
 
     const locations = (report.locations || []).slice();
 
@@ -2253,6 +2578,8 @@ function renderDistanceChart(report) {
         distanceChartInstance = null;
     }
 
+    const theme = getChartThemeColors();
+
     distanceChartInstance = new Chart(canvas, {
         type: 'line',
         data: {
@@ -2260,8 +2587,8 @@ function renderDistanceChart(report) {
             datasets: [{
                 label: `${report.employeeName || 'Employee'} - Distance Travelled (km)`,
                 data: data,
-                borderColor: '#0d6efd',
-                backgroundColor: 'rgba(13, 110, 253, 0.15)',
+                borderColor: theme.lineColor,
+                backgroundColor: theme.fillColor,
                 fill: true,
                 tension: 0.3,
                 pointRadius: locations.length <= 1 ? 5 : 3
@@ -2270,11 +2597,20 @@ function renderDistanceChart(report) {
         options: {
             responsive: true,
             scales: {
-                x: { title: { display: true, text: 'Time' } },
-                y: { title: { display: true, text: 'Distance (km)' }, beginAtZero: true }
+                x: {
+                    title: { display: true, text: 'Time', color: theme.textColor },
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                },
+                y: {
+                    title: { display: true, text: 'Distance (km)', color: theme.textColor },
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor },
+                    beginAtZero: true
+                }
             },
             plugins: {
-                legend: { display: true }
+                legend: { display: true, labels: { color: theme.textColor } }
             }
         }
     });
@@ -2373,6 +2709,13 @@ function toggleDarkMode() {
 
     }
 
+    // Chart.js draws its own colors at creation time and does not react to
+    // the body's dark-mode class on its own, so re-render with the new
+    // theme's colors (axis/legend/grid text was otherwise unreadable in
+    // Dark Mode).
+    if (lastDistanceChartReport) {
+        renderDistanceChart(lastDistanceChartReport);
+    }
 }
 
 function formatDistance(distance) {
